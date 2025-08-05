@@ -21,7 +21,7 @@ YELLOW := \033[33m
 RED := \033[31m
 RESET := \033[0m
 
-.PHONY: all build clean test deps run dev docker-build docker-run help
+.PHONY: all build clean test deps run dev docker-build docker-run docker-up docker-down db-setup db-migrate db-seed db-reset watch install-tools fmt lint vet security help
 
 # Default target
 all: clean deps test build
@@ -129,18 +129,29 @@ docker-logs:
 	@echo "$(GREEN)Showing logs...$(RESET)"
 	docker-compose logs -f
 
-# Database related commands (we'll add these later)
+# Database related commands
+db-setup:
+	@echo "$(GREEN)Setting up database with docker-compose...$(RESET)"
+	docker-compose up -d postgres redis
+	@echo "$(YELLOW)Waiting for database to be ready...$(RESET)"
+	sleep 10
+
 db-migrate:
 	@echo "$(GREEN)Running database migrations...$(RESET)"
-	# We'll implement this when we add database
-
-db-rollback:
-	@echo "$(YELLOW)Rolling back database migration...$(RESET)"
-	# We'll implement this when we add database
+	./$(BINARY_NAME) migrate
 
 db-seed:
-	@echo "$(GREEN)Seeding database...$(RESET)"
-	# We'll implement this when we add database
+	@echo "$(GREEN)Seeding database with sample data...$(RESET)"
+	./$(BINARY_NAME) seed
+
+db-reset:
+	@echo "$(YELLOW)Resetting database...$(RESET)"
+	docker-compose down postgres
+	docker volume rm api-server_postgres_data || true
+	docker-compose up -d postgres
+	sleep 15
+	make db-migrate
+	make db-seed
 
 # Hot reload (requires air)
 watch:
@@ -154,23 +165,59 @@ install-tools:
 	$(GOGET) -u github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	$(GOGET) -u github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
 
+# Quick start for development
+quick-start: deps db-setup
+	@echo "$(GREEN)Quick start completed! Run 'make dev' to start the server$(RESET)"
+
+# Full deployment
+deploy:
+	@echo "$(GREEN)Deploying application...$(RESET)"
+	make build-prod
+	make docker-build
+	make docker-up
+
 # Show help
 help:
 	@echo "$(GREEN)Available commands:$(RESET)"
+	@echo ""
+	@echo "$(GREEN)Development:$(RESET)"
+	@echo "  $(YELLOW)dev$(RESET)            - Run in development mode"
+	@echo "  $(YELLOW)watch$(RESET)          - Start hot reload with Air"
+	@echo "  $(YELLOW)quick-start$(RESET)    - Setup database and dependencies"
+	@echo ""
+	@echo "$(GREEN)Build & Run:$(RESET)"
 	@echo "  $(YELLOW)build$(RESET)          - Build the application"
 	@echo "  $(YELLOW)build-prod$(RESET)     - Build for production"
 	@echo "  $(YELLOW)run$(RESET)            - Build and run the application"
-	@echo "  $(YELLOW)dev$(RESET)            - Run in development mode"
+	@echo ""
+	@echo "$(GREEN)Testing & Quality:$(RESET)"
 	@echo "  $(YELLOW)test$(RESET)           - Run tests"
 	@echo "  $(YELLOW)test-coverage$(RESET)  - Run tests with coverage"
-	@echo "  $(YELLOW)clean$(RESET)          - Clean build artifacts"
 	@echo "  $(YELLOW)fmt$(RESET)            - Format code"
 	@echo "  $(YELLOW)lint$(RESET)           - Lint code"
 	@echo "  $(YELLOW)vet$(RESET)            - Vet code"
+	@echo "  $(YELLOW)security$(RESET)       - Run security checks"
+	@echo ""
+	@echo "$(GREEN)Dependencies:$(RESET)"
 	@echo "  $(YELLOW)deps$(RESET)           - Install dependencies"
+	@echo "  $(YELLOW)update-deps$(RESET)    - Update dependencies"
+	@echo "  $(YELLOW)check-deps$(RESET)     - Check for outdated dependencies"
+	@echo "  $(YELLOW)install-tools$(RESET)  - Install development tools"
+	@echo ""
+	@echo "$(GREEN)Docker:$(RESET)"
 	@echo "  $(YELLOW)docker-build$(RESET)   - Build Docker image"
 	@echo "  $(YELLOW)docker-run$(RESET)     - Run Docker container"
 	@echo "  $(YELLOW)docker-up$(RESET)      - Start with docker-compose"
 	@echo "  $(YELLOW)docker-down$(RESET)    - Stop docker-compose"
-	@echo "  $(YELLOW)watch$(RESET)          - Start hot reload"
-	@echo "  $(YELLOW)install-tools$(RESET)  - Install development tools"
+	@echo "  $(YELLOW)docker-logs$(RESET)    - Show docker-compose logs"
+	@echo ""
+	@echo "$(GREEN)Database:$(RESET)"
+	@echo "  $(YELLOW)db-setup$(RESET)       - Setup database with docker-compose"
+	@echo "  $(YELLOW)db-migrate$(RESET)     - Run database migrations"
+	@echo "  $(YELLOW)db-seed$(RESET)        - Seed database with sample data"
+	@echo "  $(YELLOW)db-reset$(RESET)       - Reset database completely"
+	@echo ""
+	@echo "$(GREEN)Utilities:$(RESET)"
+	@echo "  $(YELLOW)clean$(RESET)          - Clean build artifacts"
+	@echo "  $(YELLOW)deploy$(RESET)         - Full deployment"
+	@echo "  $(YELLOW)help$(RESET)           - Show this help message"

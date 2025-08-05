@@ -11,20 +11,28 @@ import (
 	"github.com/dev-mayanktiwari/api-server/internal/config"
 	"github.com/dev-mayanktiwari/api-server/internal/handler"
 	"github.com/dev-mayanktiwari/api-server/internal/middleware"
+	"github.com/dev-mayanktiwari/api-server/internal/model"
+	"github.com/dev-mayanktiwari/api-server/internal/repository"
+	"github.com/dev-mayanktiwari/api-server/internal/service"
+	"github.com/dev-mayanktiwari/api-server/pkg/auth"
+	"github.com/dev-mayanktiwari/api-server/pkg/database"
 	"github.com/dev-mayanktiwari/api-server/pkg/logger"
 	"github.com/dev-mayanktiwari/api-server/pkg/response"
 )
 
 // Server represents the HTTP server
 type Server struct {
-	config     *config.Config
-	logger     *logger.Logger
-	httpServer *http.Server
-	router     *gin.Engine
+	config      *config.Config
+	logger      *logger.Logger
+	db          *database.Database
+	jwtManager  *auth.JWTManager
+	httpServer  *http.Server
+	router      *gin.Engine
+	userHandler *handler.UserHandler
 }
 
 // New creates a new HTTP server instance
-func New(cfg *config.Config, logger *logger.Logger) *Server {
+func New(cfg *config.Config, logger *logger.Logger) (*Server, error) {
 	// Set Gin mode based on configuration
 	gin.SetMode(cfg.Server.Mode)
 
@@ -33,6 +41,29 @@ func New(cfg *config.Config, logger *logger.Logger) *Server {
 		gin.DefaultWriter = io.Discard
 		gin.DefaultErrorWriter = io.Discard
 	}
+
+	// Initialize database
+	db, err := database.New(cfg, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize database: %w", err)
+	}
+
+	// Run database migrations
+	if err := db.Migrate(&model.User{}); err != nil {
+		return nil, fmt.Errorf("failed to run database migrations: %w", err)
+	}
+
+	// Initialize JWT manager
+	jwtManager := auth.NewJWTManager(cfg.JWT.Secret, cfg.JWT.Expiry)
+
+	// Initialize repositories
+	userRepo := repository.NewUserRepository(db.DB, logger)
+
+	// Initialize services
+	userService := service.NewUserService(userRepo, jwtManager, logger)
+
+	// Initialize handlers
+	userHandler := handler.NewUserHandler(userService, logger)
 
 	// Create Gin router
 	router := gin.New()
@@ -48,17 +79,20 @@ func New(cfg *config.Config, logger *logger.Logger) *Server {
 	}
 
 	server := &Server{
-		config:     cfg,
-		logger:     logger,
-		httpServer: httpServer,
-		router:     router,
+		config:      cfg,
+		logger:      logger,
+		db:          db,
+		jwtManager:  jwtManager,
+		httpServer:  httpServer,
+		router:      router,
+		userHandler: userHandler,
 	}
 
 	// Setup middlewares and routes
 	server.setupMiddlewares()
 	server.setupRoutes()
 
-	return server
+	return server, nil
 }
 
 // setupMiddlewares configures all middlewares
@@ -74,6 +108,9 @@ func (s *Server) setupMiddlewares() {
 
 	// Logging middleware
 	s.router.Use(middleware.LoggingMiddleware(s.logger))
+
+	// JSON validation middleware
+	s.router.Use(middleware.ValidateJSON())
 
 	// Security headers middleware
 	s.router.Use(func(c *gin.Context) {
@@ -96,8 +133,9 @@ func (s *Server) setupRoutes() {
 	s.router.GET("/live", healthHandler.Liveness)
 	s.router.GET("/version", healthHandler.Version)
 
-	// API routes group
+	// API routes group with rate limiting
 	api := s.router.Group("/api")
+	api.Use(middleware.APIRateLimitMiddleware())
 	{
 		// API health check
 		api.GET("/health", healthHandler.Health)
@@ -105,8 +143,44 @@ func (s *Server) setupRoutes() {
 		// V1 API routes
 		v1 := api.Group("/v1")
 		{
-			// We'll add more endpoints here later
+			// Public endpoints (no authentication required)
 			v1.GET("/ping", s.pingHandler)
+
+			// Auth endpoints with strict rate limiting
+			auth := v1.Group("/auth")
+			auth.Use(middleware.AuthRateLimitMiddleware())
+			{
+				auth.POST("/register", s.userHandler.Register)
+				auth.POST("/login", s.userHandler.Login)
+			}
+
+			// Protected endpoints (authentication required)
+			protected := v1.Group("/")
+			protected.Use(middleware.AuthMiddleware(s.jwtManager, s.logger))
+			{
+				// User profile endpoints
+				profile := protected.Group("/profile")
+				{
+					profile.GET("", s.userHandler.GetProfile)
+					profile.PUT("", s.userHandler.UpdateProfile)
+					profile.POST("/change-password", s.userHandler.ChangePassword)
+				}
+
+				// Admin endpoints (admin role required)
+				admin := protected.Group("/admin")
+				admin.Use(middleware.AdminMiddleware())
+				{
+					// User management
+					users := admin.Group("/users")
+					users.Use(middleware.ValidatePagination())
+					{
+						users.GET("", s.userHandler.ListUsers)
+						users.GET("/:id", s.userHandler.GetUser)
+						users.PUT("/:id", s.userHandler.UpdateUser)
+						users.DELETE("/:id", s.userHandler.DeleteUser)
+					}
+				}
+			}
 		}
 	}
 
@@ -148,10 +222,18 @@ func (s *Server) Start() error {
 func (s *Server) Stop(ctx context.Context) error {
 	s.logger.Info("Shutting down HTTP server...")
 
-	// Attempt graceful shutdown
+	// Attempt graceful shutdown of HTTP server
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		s.logger.WithError(err).Error("Failed to gracefully shutdown server")
 		return err
+	}
+
+	// Close database connection
+	if s.db != nil {
+		if err := s.db.Close(); err != nil {
+			s.logger.WithError(err).Error("Failed to close database connection")
+			return err
+		}
 	}
 
 	s.logger.Info("HTTP server stopped")

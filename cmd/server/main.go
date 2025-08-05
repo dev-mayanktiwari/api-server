@@ -41,7 +41,10 @@ func main() {
 	}).Info("Starting API Server")
 
 	// Create HTTP server
-	httpServer := server.New(cfg, appLogger)
+	httpServer, err := server.New(cfg, appLogger)
+	if err != nil {
+		appLogger.WithError(err).Fatal("Failed to create HTTP server")
+	}
 
 	// Start server in a goroutine
 	go func() {
