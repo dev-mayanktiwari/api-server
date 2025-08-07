@@ -16,9 +16,9 @@ type JWTManager struct {
 
 // Claims represents the JWT claims
 type Claims struct {
-	UserID   string `json:"user_id"`
-	Email    string `json:"email"`
-	Role     string `json:"role"`
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+	Role   string `json:"role"`
 	jwt.RegisteredClaims
 }
 

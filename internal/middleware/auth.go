@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/dev-mayanktiwari/api-server/pkg/auth"
 	"github.com/dev-mayanktiwari/api-server/pkg/logger"
+	"github.com/gin-gonic/gin"
 )
 
 // AuthMiddleware creates JWT authentication middleware
@@ -17,7 +17,7 @@ func AuthMiddleware(jwtManager *auth.JWTManager, logger *logger.Logger) gin.Hand
 		if authHeader == "" {
 			logger.WithRequestID(c.GetString("request_id")).
 				Warn("Missing authorization header")
-			
+
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"message": "Authorization header is required",
@@ -38,7 +38,7 @@ func AuthMiddleware(jwtManager *auth.JWTManager, logger *logger.Logger) gin.Hand
 			logger.WithRequestID(c.GetString("request_id")).
 				WithError(err).
 				Warn("Invalid authorization header format")
-			
+
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"message": "Invalid authorization header format",
@@ -59,7 +59,7 @@ func AuthMiddleware(jwtManager *auth.JWTManager, logger *logger.Logger) gin.Hand
 			logger.WithRequestID(c.GetString("request_id")).
 				WithError(err).
 				Warn("Invalid JWT token")
-			
+
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"message": "Invalid or expired token",

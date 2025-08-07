@@ -3,9 +3,9 @@ package middleware
 import (
 	"time"
 
+	"github.com/dev-mayanktiwari/api-server/internal/config"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/dev-mayanktiwari/api-server/internal/config"
 )
 
 // CORSMiddleware configures CORS based on application configuration

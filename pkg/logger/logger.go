@@ -271,6 +271,6 @@ func (enc *prettyJSONEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.
 
 	prettyBuf.Write(prettyBytes)
 	prettyBuf.AppendString("\n")
-	
+
 	return prettyBuf, nil
 }

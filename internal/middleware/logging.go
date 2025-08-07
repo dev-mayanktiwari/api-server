@@ -3,8 +3,8 @@ package middleware
 import (
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/dev-mayanktiwari/api-server/pkg/logger"
+	"github.com/gin-gonic/gin"
 )
 
 // LoggingMiddleware logs HTTP requests with structured logging
@@ -69,9 +69,9 @@ func RecoveryMiddleware(logger *logger.Logger) gin.HandlerFunc {
 
 		// Return 500 error
 		c.JSON(500, gin.H{
-			"success":    false,
-			"message":    "Internal server error",
-			"error":      gin.H{
+			"success": false,
+			"message": "Internal server error",
+			"error": gin.H{
 				"code":    "INTERNAL_SERVER_ERROR",
 				"message": "An unexpected error occurred",
 			},

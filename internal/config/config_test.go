@@ -10,7 +10,7 @@ func TestLoad(t *testing.T) {
 	os.Setenv("APP_SERVER_PORT", "9090")
 	os.Setenv("APP_DATABASE_NAME", "test_db")
 	os.Setenv("APP_JWT_SECRET", "test-secret")
-	
+
 	defer func() {
 		// Clean up
 		os.Unsetenv("APP_SERVER_PORT")
@@ -54,30 +54,30 @@ func TestValidation(t *testing.T) {
 		{
 			name: "valid config",
 			config: Config{
-				Server:   ServerConfig{Port: "8080"},
+				Server:   ServerConfig{Port: "8080", Mode: "debug"},
 				Database: DatabaseConfig{Host: "localhost", Name: "test"},
 				JWT:      JWTConfig{Secret: "valid-secret"},
-				Logger:   LoggerConfig{Level: "info"},
+				Logger:   LoggerConfig{Level: "info", Format: "console"},
 			},
 			expectError: false,
 		},
 		{
 			name: "invalid JWT secret",
 			config: Config{
-				Server:   ServerConfig{Port: "8080"},
+				Server:   ServerConfig{Port: "8080", Mode: "debug"},
 				Database: DatabaseConfig{Host: "localhost", Name: "test"},
 				JWT:      JWTConfig{Secret: "change-this-in-production"},
-				Logger:   LoggerConfig{Level: "info"},
+				Logger:   LoggerConfig{Level: "info", Format: "console"},
 			},
 			expectError: true,
 		},
 		{
 			name: "invalid log level",
 			config: Config{
-				Server:   ServerConfig{Port: "8080"},
+				Server:   ServerConfig{Port: "8080", Mode: "debug"},
 				Database: DatabaseConfig{Host: "localhost", Name: "test"},
 				JWT:      JWTConfig{Secret: "valid-secret"},
-				Logger:   LoggerConfig{Level: "invalid"},
+				Logger:   LoggerConfig{Level: "invalid", Format: "console"},
 			},
 			expectError: true,
 		},

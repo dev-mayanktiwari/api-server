@@ -1,7 +1,6 @@
 package service
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -34,22 +33,22 @@ func (s *UserService) CreateUser(req *model.CreateUserRequest) (*model.SafeUser,
 	if err != nil {
 		return nil, fmt.Errorf("failed to check user existence: %w", err)
 	}
-	
+
 	if exists {
 		return nil, fmt.Errorf("user with email %s already exists", req.Email)
 	}
-	
+
 	// Set default role if not provided
 	role := req.Role
 	if role == "" {
 		role = "user"
 	}
-	
+
 	// Validate role
 	if !isValidRole(role) {
 		return nil, fmt.Errorf("invalid role: %s", role)
 	}
-	
+
 	// Create user model
 	user := &model.User{
 		Email:     strings.ToLower(req.Email),
@@ -59,18 +58,18 @@ func (s *UserService) CreateUser(req *model.CreateUserRequest) (*model.SafeUser,
 		Role:      role,
 		IsActive:  true,
 	}
-	
+
 	// Create user in database
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
-	
+
 	s.logger.LogUserAction("system", "create_user", "user", map[string]interface{}{
 		"user_id": user.ID,
 		"email":   user.Email,
 		"role":    user.Role,
 	})
-	
+
 	safeUser := user.ToSafeUser()
 	return &safeUser, nil
 }
@@ -85,7 +84,7 @@ func (s *UserService) Login(req *model.LoginRequest) (*model.LoginResponse, erro
 		}).Warn("Login attempt with non-existent email")
 		return nil, fmt.Errorf("invalid email or password")
 	}
-	
+
 	// Check if user is active
 	if !user.IsActive {
 		s.logger.WithFields(map[string]interface{}{
@@ -94,7 +93,7 @@ func (s *UserService) Login(req *model.LoginRequest) (*model.LoginResponse, erro
 		}).Warn("Login attempt by inactive user")
 		return nil, fmt.Errorf("account is deactivated")
 	}
-	
+
 	// Check password
 	if !user.CheckPassword(req.Password) {
 		s.logger.WithFields(map[string]interface{}{
@@ -103,17 +102,17 @@ func (s *UserService) Login(req *model.LoginRequest) (*model.LoginResponse, erro
 		}).Warn("Login attempt with incorrect password")
 		return nil, fmt.Errorf("invalid email or password")
 	}
-	
+
 	// Generate JWT token
 	token, err := s.jwtManager.GenerateToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
-	
+
 	s.logger.LogUserAction(user.ID, "login", "user", map[string]interface{}{
 		"email": user.Email,
 	})
-	
+
 	safeUser := user.ToSafeUser()
 	return &model.LoginResponse{
 		User:  safeUser,
@@ -127,7 +126,7 @@ func (s *UserService) GetUserByID(userID string) (*model.SafeUser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
-	
+
 	safeUser := user.ToSafeUser()
 	return &safeUser, nil
 }
@@ -139,12 +138,12 @@ func (s *UserService) UpdateUser(userID string, req *model.UpdateUserRequest, cu
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
-	
+
 	// Check permissions
 	if !s.canUpdateUser(userID, currentUserID, currentUserRole) {
 		return nil, fmt.Errorf("insufficient permissions to update user")
 	}
-	
+
 	// Update fields if provided
 	if req.Email != "" {
 		// Check if email is already taken by another user
@@ -154,15 +153,15 @@ func (s *UserService) UpdateUser(userID string, req *model.UpdateUserRequest, cu
 		}
 		user.Email = strings.ToLower(req.Email)
 	}
-	
+
 	if req.FirstName != "" {
 		user.FirstName = req.FirstName
 	}
-	
+
 	if req.LastName != "" {
 		user.LastName = req.LastName
 	}
-	
+
 	// Only admins can update role and status
 	if currentUserRole == "admin" {
 		if req.Role != "" {
@@ -171,22 +170,22 @@ func (s *UserService) UpdateUser(userID string, req *model.UpdateUserRequest, cu
 			}
 			user.Role = req.Role
 		}
-		
+
 		if req.IsActive != nil {
 			user.IsActive = *req.IsActive
 		}
 	}
-	
+
 	// Update user in database
 	if err := s.userRepo.Update(user); err != nil {
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
-	
+
 	s.logger.LogUserAction(currentUserID, "update_user", "user", map[string]interface{}{
 		"target_user_id": userID,
 		"email":          user.Email,
 	})
-	
+
 	safeUser := user.ToSafeUser()
 	return &safeUser, nil
 }
@@ -198,21 +197,21 @@ func (s *UserService) ChangePassword(userID string, req *model.ChangePasswordReq
 	if err != nil {
 		return fmt.Errorf("failed to get user: %w", err)
 	}
-	
+
 	// Check current password
 	if !user.CheckPassword(req.CurrentPassword) {
 		return fmt.Errorf("current password is incorrect")
 	}
-	
+
 	// Update password
 	if err := s.userRepo.UpdatePassword(userID, req.NewPassword); err != nil {
 		return fmt.Errorf("failed to update password: %w", err)
 	}
-	
+
 	s.logger.LogUserAction(userID, "change_password", "user", map[string]interface{}{
 		"user_id": userID,
 	})
-	
+
 	return nil
 }
 
@@ -222,20 +221,20 @@ func (s *UserService) DeleteUser(userID string, currentUserID string, currentUse
 	if !s.canDeleteUser(userID, currentUserID, currentUserRole) {
 		return fmt.Errorf("insufficient permissions to delete user")
 	}
-	
+
 	// Cannot delete yourself
 	if userID == currentUserID {
 		return fmt.Errorf("cannot delete your own account")
 	}
-	
+
 	if err := s.userRepo.Delete(userID); err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
-	
+
 	s.logger.LogUserAction(currentUserID, "delete_user", "user", map[string]interface{}{
 		"target_user_id": userID,
 	})
-	
+
 	return nil
 }
 
@@ -245,19 +244,19 @@ func (s *UserService) ListUsers(page, limit int, currentUserRole string) ([]mode
 	if currentUserRole != "admin" {
 		return nil, 0, fmt.Errorf("insufficient permissions to list users")
 	}
-	
+
 	offset := (page - 1) * limit
 	users, total, err := s.userRepo.List(offset, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list users: %w", err)
 	}
-	
+
 	// Convert to safe users
 	safeUsers := make([]model.SafeUser, len(users))
 	for i, user := range users {
 		safeUsers[i] = user.ToSafeUser()
 	}
-	
+
 	return safeUsers, total, nil
 }
 
@@ -267,7 +266,7 @@ func (s *UserService) canUpdateUser(targetUserID, currentUserID, currentUserRole
 	if currentUserRole == "admin" {
 		return true
 	}
-	
+
 	// Users can only update themselves
 	return targetUserID == currentUserID
 }

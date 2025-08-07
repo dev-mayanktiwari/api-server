@@ -5,8 +5,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/dev-mayanktiwari/api-server/pkg/response"
+	"github.com/gin-gonic/gin"
 )
 
 // HealthHandler handles health-related endpoints
@@ -52,7 +52,7 @@ type SystemInfo struct {
 // @Router /health [get]
 func (h *HealthHandler) Health(c *gin.Context) {
 	uptime := time.Since(h.startTime)
-	
+
 	healthResp := HealthResponse{
 		Status:    "healthy",
 		Version:   h.version,
@@ -108,8 +108,8 @@ func (h *HealthHandler) Ready(c *gin.Context) {
 		})
 	} else {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"success":    false,
-			"message":    "Application is not ready",
+			"success": false,
+			"message": "Application is not ready",
 			"error": gin.H{
 				"code":    "SERVICE_UNAVAILABLE",
 				"message": "One or more dependencies are not ready",

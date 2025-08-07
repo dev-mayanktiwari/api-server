@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dev-mayanktiwari/api-server/internal/config"
+	appLogger "github.com/dev-mayanktiwari/api-server/pkg/logger"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"github.com/dev-mayanktiwari/api-server/internal/config"
-	appLogger "github.com/dev-mayanktiwari/api-server/pkg/logger"
 )
 
 // Database wraps gorm.DB with additional functionality
@@ -21,7 +21,7 @@ type Database struct {
 // New creates a new database connection
 func New(cfg *config.Config, appLogger *appLogger.Logger) (*Database, error) {
 	dsn := cfg.GetDatabaseDSN()
-	
+
 	// Configure GORM logger
 	var gormLogLevel logger.LogLevel
 	switch cfg.Logger.Level {
@@ -79,11 +79,11 @@ func (d *Database) Close() error {
 	if err != nil {
 		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
 	}
-	
+
 	if err := sqlDB.Close(); err != nil {
 		return fmt.Errorf("failed to close database: %w", err)
 	}
-	
+
 	d.logger.Info("Database connection closed")
 	return nil
 }
@@ -91,11 +91,11 @@ func (d *Database) Close() error {
 // Migrate runs database migrations
 func (d *Database) Migrate(models ...interface{}) error {
 	d.logger.Info("Running database migrations...")
-	
+
 	if err := d.AutoMigrate(models...); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
-	
+
 	d.logger.Info("Database migrations completed successfully")
 	return nil
 }
@@ -106,11 +106,11 @@ func (d *Database) HealthCheck() error {
 	if err != nil {
 		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
 	}
-	
+
 	if err := sqlDB.Ping(); err != nil {
 		return fmt.Errorf("database ping failed: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -122,16 +122,16 @@ func (d *Database) GetStats() map[string]interface{} {
 			"error": "failed to get underlying sql.DB",
 		}
 	}
-	
+
 	stats := sqlDB.Stats()
 	return map[string]interface{}{
 		"max_open_connections": stats.MaxOpenConnections,
 		"open_connections":     stats.OpenConnections,
-		"in_use":              stats.InUse,
-		"idle":                stats.Idle,
-		"wait_count":          stats.WaitCount,
-		"wait_duration":       stats.WaitDuration.String(),
-		"max_idle_closed":     stats.MaxIdleClosed,
+		"in_use":               stats.InUse,
+		"idle":                 stats.Idle,
+		"wait_count":           stats.WaitCount,
+		"wait_duration":        stats.WaitDuration.String(),
+		"max_idle_closed":      stats.MaxIdleClosed,
 		"max_idle_time_closed": stats.MaxIdleTimeClosed,
 		"max_lifetime_closed":  stats.MaxLifetimeClosed,
 	}
@@ -147,7 +147,12 @@ func (d *Database) Transaction(fn func(*gorm.DB) error) error {
 // WithContext returns a new database instance with context
 func (d *Database) WithContext(ctx interface{}) *Database {
 	return &Database{
-		DB:     d.DB.WithContext(ctx.(interface{ Deadline() (time.Time, bool); Done() <-chan struct{}; Err() error; Value(interface{}) interface{} })),
+		DB: d.DB.WithContext(ctx.(interface {
+			Deadline() (time.Time, bool)
+			Done() <-chan struct{}
+			Err() error
+			Value(interface{}) interface{}
+		})),
 		config: d.config,
 		logger: d.logger,
 	}

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/dev-mayanktiwari/api-server/internal/config"
 	"github.com/dev-mayanktiwari/api-server/internal/handler"
 	"github.com/dev-mayanktiwari/api-server/internal/middleware"
@@ -18,6 +17,7 @@ import (
 	"github.com/dev-mayanktiwari/api-server/pkg/database"
 	"github.com/dev-mayanktiwari/api-server/pkg/logger"
 	"github.com/dev-mayanktiwari/api-server/pkg/response"
+	"github.com/gin-gonic/gin"
 )
 
 // Server represents the HTTP server

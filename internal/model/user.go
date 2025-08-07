@@ -9,15 +9,15 @@ import (
 
 // User represents a user in the system
 type User struct {
-	ID        string    `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	Email     string    `json:"email" gorm:"uniqueIndex;not null"`
-	Password  string    `json:"-" gorm:"not null"` // Never serialize password
-	FirstName string    `json:"first_name" gorm:"not null"`
-	LastName  string    `json:"last_name" gorm:"not null"`
-	Role      string    `json:"role" gorm:"default:user;not null"`
-	IsActive  bool      `json:"is_active" gorm:"default:true;not null"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string         `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	Email     string         `json:"email" gorm:"uniqueIndex;not null"`
+	Password  string         `json:"-" gorm:"not null"` // Never serialize password
+	FirstName string         `json:"first_name" gorm:"not null"`
+	LastName  string         `json:"last_name" gorm:"not null"`
+	Role      string         `json:"role" gorm:"default:user;not null"`
+	IsActive  bool           `json:"is_active" gorm:"default:true;not null"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 }
 

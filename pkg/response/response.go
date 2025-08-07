@@ -79,8 +79,8 @@ func SuccessWithMeta(c *gin.Context, message string, data interface{}, meta *Met
 // Error sends an error response
 func Error(c *gin.Context, statusCode int, code string, message string) {
 	response := APIResponse{
-		Success:   false,
-		Message:   "Request failed",
+		Success: false,
+		Message: "Request failed",
 		Error: &ErrorInfo{
 			Code:    code,
 			Message: message,
@@ -94,8 +94,8 @@ func Error(c *gin.Context, statusCode int, code string, message string) {
 // ValidationError sends a validation error response
 func ValidationError(c *gin.Context, details map[string]string) {
 	response := APIResponse{
-		Success:   false,
-		Message:   "Validation failed",
+		Success: false,
+		Message: "Validation failed",
 		Error: &ErrorInfo{
 			Code:    "VALIDATION_ERROR",
 			Message: "One or more fields are invalid",
@@ -164,17 +164,17 @@ func CalculateMeta(page, limit, total int) *Meta {
 // GetPaginationParams extracts and validates pagination parameters
 func GetPaginationParams(c *gin.Context) PaginationParams {
 	var params PaginationParams
-	
+
 	// Set defaults
 	params.Page = 1
 	params.Limit = 10
-	
+
 	// Bind query parameters
 	if err := c.ShouldBindQuery(&params); err != nil {
 		// If binding fails, return defaults
 		return PaginationParams{Page: 1, Limit: 10}
 	}
-	
+
 	// Additional validation
 	if params.Page < 1 {
 		params.Page = 1
@@ -182,6 +182,6 @@ func GetPaginationParams(c *gin.Context) PaginationParams {
 	if params.Limit < 1 || params.Limit > 100 {
 		params.Limit = 10
 	}
-	
+
 	return params
 }

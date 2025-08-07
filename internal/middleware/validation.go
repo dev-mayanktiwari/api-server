@@ -19,7 +19,7 @@ func ValidationMiddleware() gin.HandlerFunc {
 // HandleValidationErrors converts validation errors to user-friendly format
 func HandleValidationErrors(err error) gin.H {
 	var validationErrors []gin.H
-	
+
 	if errs, ok := err.(validator.ValidationErrors); ok {
 		for _, fieldErr := range errs {
 			validationErrors = append(validationErrors, gin.H{
@@ -34,7 +34,7 @@ func HandleValidationErrors(err error) gin.H {
 			"message": err.Error(),
 		})
 	}
-	
+
 	return gin.H{
 		"success": false,
 		"message": "Validation failed",
@@ -50,7 +50,7 @@ func HandleValidationErrors(err error) gin.H {
 // getValidationMessage returns user-friendly validation messages
 func getValidationMessage(fieldErr validator.FieldError) string {
 	field := strings.ToLower(fieldErr.Field())
-	
+
 	switch fieldErr.Tag() {
 	case "required":
 		return field + " is required"
@@ -114,7 +114,7 @@ func ValidateJSON() gin.HandlerFunc {
 				return
 			}
 		}
-		
+
 		c.Next()
 	}
 }
@@ -127,13 +127,13 @@ func ValidatePagination() gin.HandlerFunc {
 		if page == "" || page == "0" {
 			page = "1"
 		}
-		
+
 		// Get limit parameter
 		limit := c.DefaultQuery("limit", "10")
 		if limit == "" {
 			limit = "10"
 		}
-		
+
 		// Validate page is a positive integer
 		if !isPositiveInteger(page) {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -149,7 +149,7 @@ func ValidatePagination() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		
+
 		// Validate limit is a positive integer and not too large
 		if !isPositiveInteger(limit) {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -165,7 +165,7 @@ func ValidatePagination() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		
+
 		// Set maximum limit
 		if parseToInt(limit) > 100 {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -181,11 +181,11 @@ func ValidatePagination() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		
+
 		// Set validated values in context
 		c.Set("page", parseToInt(page))
 		c.Set("limit", parseToInt(limit))
-		
+
 		c.Next()
 	}
 }
@@ -195,13 +195,13 @@ func isPositiveInteger(s string) bool {
 	if s == "" || s == "0" {
 		return false
 	}
-	
+
 	for _, char := range s {
 		if char < '0' || char > '9' {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
