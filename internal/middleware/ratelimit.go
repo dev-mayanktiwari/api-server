@@ -58,8 +58,8 @@ func (rl *RateLimiter) cleanupWorker() {
 			// Remove limiter if it hasn't been used recently
 			if limiter.Allow() {
 				// If limiter allows immediately, it's likely inactive
-				// We use a simple heuristic here
-				continue
+				// We use a simple heuristic here - remove it
+				delete(rl.clients, clientID)
 			}
 		}
 		rl.mu.Unlock()
@@ -73,10 +73,10 @@ func RateLimitMiddleware(rps float64, burst int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Use client IP as the identifier
 		clientID := c.ClientIP()
-		
+
 		// Get the rate limiter for this client
 		limiter := rl.getLimiter(clientID)
-		
+
 		// Check if request is allowed
 		if !limiter.Allow() {
 			c.JSON(http.StatusTooManyRequests, gin.H{

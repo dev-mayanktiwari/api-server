@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: microservices
+  labels:
+    app: api-gateway
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+      - name: api-gateway
+        image: api-gateway:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        env:
+        - name: GATEWAY_SERVER_PORT
+          value: "8080"
+        - name: GATEWAY_SERVER_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: GIN_MODE
+        - name: GATEWAY_SERVICES_AUTH_SERVICE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: AUTH_SERVICE_URL
+        - name: GATEWAY_SERVICES_USER_SERVICE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: USER_SERVICE_URL
+        - name: GATEWAY_LOGGER_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: LOG_LEVEL
+        - name: GATEWAY_LOGGER_FORMAT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: LOG_FORMAT
+        - name: GATEWAY_CORS_ALLOW_ORIGINS
+          value: "*"
+        - name: GATEWAY_CORS_ALLOW_CREDENTIALS
+          value: "true"
+        - name: GATEWAY_CORS_MAX_AGE
+          value: "86400"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5

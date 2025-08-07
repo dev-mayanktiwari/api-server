@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  # Database
+  postgres:
+    image: postgres:15
+    container_name: microservices-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_MULTIPLE_DATABASES: auth_db,user_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh
+    networks:
+      - microservices
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Auth Service
+  auth-service:
+    build: 
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: microservices-auth
+    environment:
+      - AUTH_SERVER_PORT=8081
+      - AUTH_SERVER_MODE=debug
+      - AUTH_DATABASE_HOST=postgres
+      - AUTH_DATABASE_PORT=5432
+      - AUTH_DATABASE_USER=postgres
+      - AUTH_DATABASE_PASSWORD=password
+      - AUTH_DATABASE_NAME=auth_db
+      - AUTH_DATABASE_SSL_MODE=disable
+      - AUTH_JWT_SECRET_KEY=your-super-secret-jwt-key-change-in-production
+      - AUTH_JWT_ACCESS_TOKEN_DURATION=15
+      - AUTH_JWT_REFRESH_TOKEN_DURATION=168
+      - AUTH_LOGGER_LEVEL=debug
+      - AUTH_LOGGER_FORMAT=console
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices
+    restart: unless-stopped
+
+  # User Service
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    container_name: microservices-user
+    environment:
+      - USER_SERVER_PORT=8082
+      - USER_SERVER_MODE=debug
+      - USER_DATABASE_HOST=postgres
+      - USER_DATABASE_PORT=5432
+      - USER_DATABASE_USER=postgres
+      - USER_DATABASE_PASSWORD=password
+      - USER_DATABASE_NAME=user_db
+      - USER_DATABASE_SSL_MODE=disable
+      - USER_SERVICES_AUTH_SERVICE=http://auth-service:8081
+      - USER_LOGGER_LEVEL=debug
+      - USER_LOGGER_FORMAT=console
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    networks:
+      - microservices
+    restart: unless-stopped
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: microservices-gateway
+    environment:
+      - GATEWAY_SERVER_PORT=8080
+      - GATEWAY_SERVER_MODE=debug
+      - GATEWAY_SERVICES_AUTH_SERVICE=http://auth-service:8081
+      - GATEWAY_SERVICES_USER_SERVICE=http://user-service:8082
+      - GATEWAY_LOGGER_LEVEL=debug
+      - GATEWAY_LOGGER_FORMAT=console
+      - GATEWAY_CORS_ALLOW_ORIGINS=*
+      - GATEWAY_CORS_ALLOW_CREDENTIALS=true
+      - GATEWAY_CORS_MAX_AGE=86400
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-service
+      - user-service
+    networks:
+      - microservices
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  microservices:
+    driver: bridge

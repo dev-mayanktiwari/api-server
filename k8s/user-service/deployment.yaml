@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: microservices
+  labels:
+    app: user-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+      - name: user-service
+        image: user-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8082
+        env:
+        - name: USER_SERVER_PORT
+          value: "8082"
+        - name: USER_SERVER_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: GIN_MODE
+        - name: USER_DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_HOST
+        - name: USER_DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_PORT
+        - name: USER_DATABASE_USER
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_USER
+        - name: USER_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: DB_PASSWORD
+        - name: USER_DATABASE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_NAME_USER
+        - name: USER_DATABASE_SSL_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_SSL_MODE
+        - name: USER_SERVICES_AUTH_SERVICE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: AUTH_SERVICE_URL
+        - name: USER_LOGGER_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: LOG_LEVEL
+        - name: USER_LOGGER_FORMAT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: LOG_FORMAT
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
