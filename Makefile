@@ -1,223 +1,498 @@
-# Variables
-APP_NAME := api-server
-BINARY_NAME := $(APP_NAME)
-CMD_PATH := ./cmd/server
+# API Server Makefile
+# Production-ready build automation for microservices architecture
 
-# Go related variables
-GOCMD := go
-GOBUILD := $(GOCMD) build
-GOCLEAN := $(GOCMD) clean
-GOTEST := $(GOCMD) test
-GOGET := $(GOCMD) get
-GOMOD := $(GOCMD) mod
+# Variables
+SHELL := /bin/bash
+.DEFAULT_GOAL := help
+
+# Project information
+PROJECT_NAME := api-server
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.1.0")
+COMMIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Go variables
+GO_VERSION := 1.23.2
+GOOS := $(shell go env GOOS)
+GOARCH := $(shell go env GOARCH)
+CGO_ENABLED := 0
+
+# Directories
+BIN_DIR := bin
+BUILD_DIR := build
+COVERAGE_DIR := coverage
+DOCS_DIR := docs
+TOOLS_DIR := tools
+
+# Services
+SERVICES := api-gateway auth-service user-service
+SERVICE_PORTS := 8080 8081 8082
+
+# Docker variables
+DOCKER_REGISTRY := ghcr.io/dev-mayanktiwari
+DOCKER_TAG := $(VERSION)
+DOCKERFILE_DIR := deployments/docker
 
 # Build flags
-BUILD_FLAGS := -v
-LDFLAGS := -ldflags="-s -w"
+LDFLAGS := -ldflags="-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT_HASH) -X main.date=$(BUILD_DATE)"
+BUILD_FLAGS := $(LDFLAGS) -trimpath
+
+# Test flags
+TEST_FLAGS := -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic
+TEST_PACKAGES := ./...
+TEST_TIMEOUT := 300s
 
 # Colors for output
+RED := \033[31m
 GREEN := \033[32m
 YELLOW := \033[33m
-RED := \033[31m
+BLUE := \033[34m
+MAGENTA := \033[35m
+CYAN := \033[36m
+WHITE := \033[37m
 RESET := \033[0m
 
-.PHONY: all build clean test deps run dev docker-build docker-run docker-up docker-down db-setup db-migrate db-seed db-reset watch install-tools fmt lint vet security help
+##@ General
 
-# Default target
-all: clean deps test build
+.PHONY: help
+help: ## Display this help
+	@awk 'BEGIN {FS = ":.*##"; printf "\n$(BLUE)Usage:$(RESET)\n  make $(CYAN)<target>$(RESET)\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  $(CYAN)%-15s$(RESET) %s\n", $$1, $$2 } /^##@/ { printf "\n$(YELLOW)%s$(RESET)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-# Install dependencies
-deps:
+.PHONY: version
+version: ## Show version information
+	@echo "$(GREEN)Project:$(RESET) $(PROJECT_NAME)"
+	@echo "$(GREEN)Version:$(RESET) $(VERSION)"
+	@echo "$(GREEN)Commit:$(RESET) $(COMMIT_HASH)"
+	@echo "$(GREEN)Build Date:$(RESET) $(BUILD_DATE)"
+	@echo "$(GREEN)Go Version:$(RESET) $(GO_VERSION)"
+	@echo "$(GREEN)OS/Arch:$(RESET) $(GOOS)/$(GOARCH)"
+
+##@ Development
+
+.PHONY: setup-dev
+setup-dev: ## Setup development environment
+	@echo "$(GREEN)Setting up development environment...$(RESET)"
+	@mkdir -p $(BIN_DIR) $(BUILD_DIR) $(COVERAGE_DIR)
+	@$(MAKE) install-tools
+	@$(MAKE) deps
+	@$(MAKE) setup-hooks
+	@echo "$(GREEN)Development environment ready!$(RESET)"
+
+.PHONY: deps
+deps: ## Install dependencies
 	@echo "$(GREEN)Installing dependencies...$(RESET)"
-	$(GOMOD) download
-	$(GOMOD) tidy
+	@go mod download
+	@go mod tidy
+	@cd shared && go mod download && go mod tidy
+	@for service in $(SERVICES); do \
+		echo "Installing dependencies for $$service..."; \
+		cd services/$$service && go mod download && go mod tidy && cd ../..; \
+	done
 
-# Build the application
-build:
-	@echo "$(GREEN)Building $(APP_NAME)...$(RESET)"
-	$(GOBUILD) $(BUILD_FLAGS) $(LDFLAGS) -o $(BINARY_NAME) $(CMD_PATH)
-
-# Build for production (optimized)
-build-prod:
-	@echo "$(GREEN)Building $(APP_NAME) for production...$(RESET)"
-	CGO_ENABLED=0 GOOS=linux $(GOBUILD) $(LDFLAGS) -a -installsuffix cgo -o $(BINARY_NAME) $(CMD_PATH)
-
-# Run the application
-run: build
-	@echo "$(GREEN)Running $(APP_NAME)...$(RESET)"
-	./$(BINARY_NAME)
-
-# Run in development mode (just go run)
-dev:
-	@echo "$(GREEN)Running $(APP_NAME) in development mode...$(RESET)"
-	$(GOCMD) run $(CMD_PATH)/main.go
-
-# Run tests
-test:
-	@echo "$(GREEN)Running tests...$(RESET)"
-	$(GOTEST) -v ./...
-
-# Run tests with coverage
-test-coverage:
-	@echo "$(GREEN)Running tests with coverage...$(RESET)"
-	$(GOTEST) -v -race -coverprofile=coverage.out ./...
-	$(GOCMD) tool cover -html=coverage.out -o coverage.html
-	@echo "$(YELLOW)Coverage report generated: coverage.html$(RESET)"
-
-# Run tests and generate coverage for CI
-test-ci:
-	@echo "$(GREEN)Running tests for CI...$(RESET)"
-	$(GOTEST) -v -race -coverprofile=coverage.out ./...
-
-# Clean build artifacts
-clean:
-	@echo "$(YELLOW)Cleaning...$(RESET)"
-	$(GOCLEAN)
-	rm -f $(BINARY_NAME)
-	rm -f coverage.out coverage.html
-
-# Format code
-fmt:
-	@echo "$(GREEN)Formatting code...$(RESET)"
-	$(GOCMD) fmt ./...
-
-# Lint code (requires golangci-lint)
-lint:
-	@echo "$(GREEN)Linting code...$(RESET)"
-	golangci-lint run
-
-# Vet code
-vet:
-	@echo "$(GREEN)Vetting code...$(RESET)"
-	$(GOCMD) vet ./...
-
-# Security check (requires gosec)
-security:
-	@echo "$(GREEN)Running security check...$(RESET)"
-	gosec ./...
-
-# Check for outdated dependencies
-check-deps:
-	@echo "$(GREEN)Checking for outdated dependencies...$(RESET)"
-	$(GOCMD) list -u -m all
-
-# Update dependencies
-update-deps:
+.PHONY: update-deps
+update-deps: ## Update dependencies
 	@echo "$(GREEN)Updating dependencies...$(RESET)"
-	$(GOGET) -u ./...
-	$(GOMOD) tidy
+	@go get -u ./...
+	@go mod tidy
+	@cd shared && go get -u ./... && go mod tidy && cd ..
+	@for service in $(SERVICES); do \
+		echo "Updating dependencies for $$service..."; \
+		cd services/$$service && go get -u ./... && go mod tidy && cd ../..; \
+	done
 
-# Docker related commands
-docker-build:
-	@echo "$(GREEN)Building Docker image...$(RESET)"
-	docker build -t $(APP_NAME):latest .
-
-docker-run:
-	@echo "$(GREEN)Running Docker container...$(RESET)"
-	docker run --rm -p 8080:8080 --env-file .env $(APP_NAME):latest
-
-# Docker compose commands
-docker-up:
-	@echo "$(GREEN)Starting services with docker-compose...$(RESET)"
-	docker-compose up -d
-
-docker-down:
-	@echo "$(YELLOW)Stopping services...$(RESET)"
-	docker-compose down
-
-docker-logs:
-	@echo "$(GREEN)Showing logs...$(RESET)"
-	docker-compose logs -f
-
-# Database related commands
-db-setup:
-	@echo "$(GREEN)Setting up database with docker-compose...$(RESET)"
-	docker-compose up -d postgres redis
-	@echo "$(YELLOW)Waiting for database to be ready...$(RESET)"
-	sleep 10
-
-db-migrate:
-	@echo "$(GREEN)Running database migrations...$(RESET)"
-	./$(BINARY_NAME) migrate
-
-db-seed:
-	@echo "$(GREEN)Seeding database with sample data...$(RESET)"
-	./$(BINARY_NAME) seed
-
-db-reset:
-	@echo "$(YELLOW)Resetting database...$(RESET)"
-	docker-compose down postgres
-	docker volume rm api-server_postgres_data || true
-	docker-compose up -d postgres
-	sleep 15
-	make db-migrate
-	make db-seed
-
-# Hot reload (requires air)
-watch:
-	@echo "$(GREEN)Starting hot reload with Air...$(RESET)"
-	air
-
-# Install development tools
-install-tools:
+.PHONY: install-tools
+install-tools: ## Install development tools
 	@echo "$(GREEN)Installing development tools...$(RESET)"
-	$(GOGET) -u github.com/cosmtrek/air@latest
-	$(GOGET) -u github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	$(GOGET) -u github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@go install github.com/securecodewarrior/sast-scan/cmd/gosec@latest
+	@go install golang.org/x/tools/cmd/goimports@latest
+	@go install github.com/swaggo/swag/cmd/swag@latest
+	@go install github.com/cosmtrek/air@latest
+	@go install github.com/go-delve/delve/cmd/dlv@latest
 
-# Quick start for development
-quick-start: deps db-setup
-	@echo "$(GREEN)Quick start completed! Run 'make dev' to start the server$(RESET)"
+.PHONY: setup-hooks
+setup-hooks: ## Setup git pre-commit hooks
+	@echo "$(GREEN)Setting up git hooks...$(RESET)"
+	@echo '#!/bin/sh' > .git/hooks/pre-commit
+	@echo 'make pre-commit' >> .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "$(GREEN)Pre-commit hooks installed!$(RESET)"
 
-# Full deployment
-deploy:
-	@echo "$(GREEN)Deploying application...$(RESET)"
-	make build-prod
-	make docker-build
-	make docker-up
+##@ Building
 
-# Show help
-help:
-	@echo "$(GREEN)Available commands:$(RESET)"
-	@echo ""
-	@echo "$(GREEN)Development:$(RESET)"
-	@echo "  $(YELLOW)dev$(RESET)            - Run in development mode"
-	@echo "  $(YELLOW)watch$(RESET)          - Start hot reload with Air"
-	@echo "  $(YELLOW)quick-start$(RESET)    - Setup database and dependencies"
-	@echo ""
-	@echo "$(GREEN)Build & Run:$(RESET)"
-	@echo "  $(YELLOW)build$(RESET)          - Build the application"
-	@echo "  $(YELLOW)build-prod$(RESET)     - Build for production"
-	@echo "  $(YELLOW)run$(RESET)            - Build and run the application"
-	@echo ""
-	@echo "$(GREEN)Testing & Quality:$(RESET)"
-	@echo "  $(YELLOW)test$(RESET)           - Run tests"
-	@echo "  $(YELLOW)test-coverage$(RESET)  - Run tests with coverage"
-	@echo "  $(YELLOW)fmt$(RESET)            - Format code"
-	@echo "  $(YELLOW)lint$(RESET)           - Lint code"
-	@echo "  $(YELLOW)vet$(RESET)            - Vet code"
-	@echo "  $(YELLOW)security$(RESET)       - Run security checks"
-	@echo ""
-	@echo "$(GREEN)Dependencies:$(RESET)"
-	@echo "  $(YELLOW)deps$(RESET)           - Install dependencies"
-	@echo "  $(YELLOW)update-deps$(RESET)    - Update dependencies"
-	@echo "  $(YELLOW)check-deps$(RESET)     - Check for outdated dependencies"
-	@echo "  $(YELLOW)install-tools$(RESET)  - Install development tools"
-	@echo ""
-	@echo "$(GREEN)Docker:$(RESET)"
-	@echo "  $(YELLOW)docker-build$(RESET)   - Build Docker image"
-	@echo "  $(YELLOW)docker-run$(RESET)     - Run Docker container"
-	@echo "  $(YELLOW)docker-up$(RESET)      - Start with docker-compose"
-	@echo "  $(YELLOW)docker-down$(RESET)    - Stop docker-compose"
-	@echo "  $(YELLOW)docker-logs$(RESET)    - Show docker-compose logs"
-	@echo ""
-	@echo "$(GREEN)Database:$(RESET)"
-	@echo "  $(YELLOW)db-setup$(RESET)       - Setup database with docker-compose"
-	@echo "  $(YELLOW)db-migrate$(RESET)     - Run database migrations"
-	@echo "  $(YELLOW)db-seed$(RESET)        - Seed database with sample data"
-	@echo "  $(YELLOW)db-reset$(RESET)       - Reset database completely"
-	@echo ""
-	@echo "$(GREEN)Utilities:$(RESET)"
-	@echo "  $(YELLOW)clean$(RESET)          - Clean build artifacts"
-	@echo "  $(YELLOW)deploy$(RESET)         - Full deployment"
-	@echo "  $(YELLOW)help$(RESET)           - Show this help message"
+.PHONY: build
+build: ## Build all services
+	@echo "$(GREEN)Building all services...$(RESET)"
+	@$(MAKE) build-shared
+	@for service in $(SERVICES); do \
+		$(MAKE) build-service SERVICE=$$service; \
+	done
+
+.PHONY: build-shared
+build-shared: ## Build shared library
+	@echo "$(GREEN)Building shared library...$(RESET)"
+	@cd shared && go build $(BUILD_FLAGS) ./...
+
+.PHONY: build-service
+build-service: ## Build specific service (requires SERVICE variable)
+	@if [ -z "$(SERVICE)" ]; then echo "$(RED)SERVICE variable is required$(RESET)"; exit 1; fi
+	@echo "$(GREEN)Building $(SERVICE)...$(RESET)"
+	@cd services/$(SERVICE) && \
+		CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
+		go build $(BUILD_FLAGS) -o ../../$(BIN_DIR)/$(SERVICE) ./cmd/server
+
+.PHONY: build-monolith
+build-monolith: ## Build monolith version for development
+	@echo "$(GREEN)Building monolith...$(RESET)"
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
+		go build $(BUILD_FLAGS) -o $(BIN_DIR)/monolith ./cmd/monolith
+
+.PHONY: build-prod
+build-prod: ## Build for production (all platforms)
+	@echo "$(GREEN)Building for production...$(RESET)"
+	@mkdir -p $(BUILD_DIR)
+	@for service in $(SERVICES); do \
+		for os in linux darwin windows; do \
+			for arch in amd64 arm64; do \
+				if [ "$$os" = "windows" ]; then ext=".exe"; else ext=""; fi; \
+				echo "Building $$service for $$os/$$arch..."; \
+				cd services/$$service && \
+				CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
+				go build $(BUILD_FLAGS) -o ../../$(BUILD_DIR)/$$service-$$os-$$arch$$ext ./cmd/server && \
+				cd ../..; \
+			done; \
+		done; \
+	done
+
+.PHONY: clean
+clean: ## Clean build artifacts
+	@echo "$(GREEN)Cleaning build artifacts...$(RESET)"
+	@rm -rf $(BIN_DIR) $(BUILD_DIR) $(COVERAGE_DIR)
+	@go clean -cache
+	@docker system prune -f
+
+##@ Running
+
+.PHONY: run
+run: build-monolith ## Build and run monolith
+	@echo "$(GREEN)Starting monolith...$(RESET)"
+	@ENVIRONMENT=development ./$(BIN_DIR)/monolith
+
+.PHONY: run-service
+run-service: ## Run specific service (requires SERVICE variable)
+	@if [ -z "$(SERVICE)" ]; then echo "$(RED)SERVICE variable is required$(RESET)"; exit 1; fi
+	@$(MAKE) build-service SERVICE=$(SERVICE)
+	@echo "$(GREEN)Starting $(SERVICE)...$(RESET)"
+	@ENVIRONMENT=development ./$(BIN_DIR)/$(SERVICE)
+
+.PHONY: run-all
+run-all: ## Run all services in background
+	@echo "$(GREEN)Starting all services...$(RESET)"
+	@for service in $(SERVICES); do \
+		$(MAKE) build-service SERVICE=$$service; \
+		ENVIRONMENT=development ./$(BIN_DIR)/$$service & \
+		echo "Started $$service"; \
+	done
+	@echo "$(GREEN)All services started!$(RESET)"
+	@echo "$(YELLOW)Use 'make stop-all' to stop all services$(RESET)"
+
+.PHONY: stop-all
+stop-all: ## Stop all running services
+	@echo "$(GREEN)Stopping all services...$(RESET)"
+	@for service in $(SERVICES); do \
+		pkill -f "./$(BIN_DIR)/$$service" || true; \
+	done
+
+.PHONY: dev
+dev: ## Run in development mode with hot reload
+	@echo "$(GREEN)Starting development mode with hot reload...$(RESET)"
+	@air -c .air.toml
+
+##@ Testing
+
+.PHONY: test
+test: ## Run all tests
+	@echo "$(GREEN)Running tests...$(RESET)"
+	@mkdir -p $(COVERAGE_DIR)
+	@go test $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) $(TEST_PACKAGES)
+	@$(MAKE) test-shared
+	@for service in $(SERVICES); do \
+		$(MAKE) test-service SERVICE=$$service; \
+	done
+
+.PHONY: test-shared
+test-shared: ## Test shared library
+	@echo "$(GREEN)Testing shared library...$(RESET)"
+	@cd shared && go test $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) ./...
+
+.PHONY: test-service
+test-service: ## Test specific service (requires SERVICE variable)
+	@if [ -z "$(SERVICE)" ]; then echo "$(RED)SERVICE variable is required$(RESET)"; exit 1; fi
+	@echo "$(GREEN)Testing $(SERVICE)...$(RESET)"
+	@cd services/$(SERVICE) && go test $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) ./...
+
+.PHONY: test-integration
+test-integration: ## Run integration tests
+	@echo "$(GREEN)Running integration tests...$(RESET)"
+	@go test -tags=integration $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) ./tests/...
+
+.PHONY: test-e2e
+test-e2e: ## Run end-to-end tests
+	@echo "$(GREEN)Running end-to-end tests...$(RESET)"
+	@docker-compose -f docker-compose.test.yml up -d
+	@sleep 10
+	@go test -tags=e2e $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) ./tests/e2e/...
+	@docker-compose -f docker-compose.test.yml down
+
+.PHONY: test-coverage
+test-coverage: test ## Generate test coverage report
+	@echo "$(GREEN)Generating coverage report...$(RESET)"
+	@go tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
+	@go tool cover -func=$(COVERAGE_DIR)/coverage.out | grep total | awk '{print "Total coverage: " $$3}'
+	@echo "$(GREEN)Coverage report generated: $(COVERAGE_DIR)/coverage.html$(RESET)"
+
+.PHONY: test-unit
+test-unit: ## Run only unit tests
+	@echo "$(GREEN)Running unit tests...$(RESET)"
+	@go test -short $(TEST_FLAGS) -timeout $(TEST_TIMEOUT) $(TEST_PACKAGES)
+
+.PHONY: benchmark
+benchmark: ## Run benchmarks
+	@echo "$(GREEN)Running benchmarks...$(RESET)"
+	@go test -bench=. -benchmem -run=^Benchmark $(TEST_PACKAGES)
+
+##@ Quality Assurance
+
+.PHONY: fmt
+fmt: ## Format code
+	@echo "$(GREEN)Formatting code...$(RESET)"
+	@go fmt ./...
+	@goimports -w .
+	@cd shared && go fmt ./... && goimports -w . && cd ..
+	@for service in $(SERVICES); do \
+		cd services/$$service && go fmt ./... && goimports -w . && cd ../..; \
+	done
+
+.PHONY: lint
+lint: ## Lint code
+	@echo "$(GREEN)Linting code...$(RESET)"
+	@golangci-lint run ./...
+	@cd shared && golangci-lint run ./... && cd ..
+	@for service in $(SERVICES); do \
+		cd services/$$service && golangci-lint run ./... && cd ../..; \
+	done
+
+.PHONY: vet
+vet: ## Vet code
+	@echo "$(GREEN)Vetting code...$(RESET)"
+	@go vet ./...
+	@cd shared && go vet ./... && cd ..
+	@for service in $(SERVICES); do \
+		cd services/$$service && go vet ./... && cd ../..; \
+	done
+
+.PHONY: security
+security: ## Run security checks
+	@echo "$(GREEN)Running security checks...$(RESET)"
+	@gosec -quiet ./...
+	@cd shared && gosec -quiet ./... && cd ..
+	@for service in $(SERVICES); do \
+		cd services/$$service && gosec -quiet ./... && cd ../..; \
+	done
+
+.PHONY: pre-commit
+pre-commit: fmt vet lint security test-unit ## Run pre-commit checks
+	@echo "$(GREEN)All pre-commit checks passed!$(RESET)"
+
+##@ Docker
+
+.PHONY: docker-build
+docker-build: ## Build Docker images for all services
+	@echo "$(GREEN)Building Docker images...$(RESET)"
+	@for service in $(SERVICES); do \
+		echo "Building $$service image..."; \
+		docker build -f services/$$service/Dockerfile -t $(DOCKER_REGISTRY)/$$service:$(DOCKER_TAG) .; \
+		docker tag $(DOCKER_REGISTRY)/$$service:$(DOCKER_TAG) $(DOCKER_REGISTRY)/$$service:latest; \
+	done
+
+.PHONY: docker-build-service
+docker-build-service: ## Build Docker image for specific service (requires SERVICE variable)
+	@if [ -z "$(SERVICE)" ]; then echo "$(RED)SERVICE variable is required$(RESET)"; exit 1; fi
+	@echo "$(GREEN)Building $(SERVICE) Docker image...$(RESET)"
+	@docker build -f services/$(SERVICE)/Dockerfile -t $(DOCKER_REGISTRY)/$(SERVICE):$(DOCKER_TAG) .
+	@docker tag $(DOCKER_REGISTRY)/$(SERVICE):$(DOCKER_TAG) $(DOCKER_REGISTRY)/$(SERVICE):latest
+
+.PHONY: docker-push
+docker-push: ## Push Docker images to registry
+	@echo "$(GREEN)Pushing Docker images...$(RESET)"
+	@for service in $(SERVICES); do \
+		echo "Pushing $$service image..."; \
+		docker push $(DOCKER_REGISTRY)/$$service:$(DOCKER_TAG); \
+		docker push $(DOCKER_REGISTRY)/$$service:latest; \
+	done
+
+.PHONY: docker-up
+docker-up: ## Start services with docker-compose
+	@echo "$(GREEN)Starting services with docker-compose...$(RESET)"
+	@docker-compose up -d
+
+.PHONY: docker-down
+docker-down: ## Stop services with docker-compose
+	@echo "$(GREEN)Stopping services with docker-compose...$(RESET)"
+	@docker-compose down
+
+.PHONY: docker-logs
+docker-logs: ## Show docker-compose logs
+	@docker-compose logs -f
+
+.PHONY: docker-clean
+docker-clean: ## Clean Docker images and volumes
+	@echo "$(GREEN)Cleaning Docker images and volumes...$(RESET)"
+	@docker-compose down -v
+	@docker system prune -f
+	@docker volume prune -f
+
+##@ Database
+
+.PHONY: db-setup
+db-setup: ## Setup database with docker-compose
+	@echo "$(GREEN)Setting up database...$(RESET)"
+	@docker-compose up -d postgres
+	@echo "$(GREEN)Waiting for database to be ready...$(RESET)"
+	@sleep 10
+	@$(MAKE) migrate
+
+.PHONY: migrate
+migrate: ## Run database migrations
+	@echo "$(GREEN)Running database migrations...$(RESET)"
+	@go run ./cmd/migrate
+
+.PHONY: migrate-down
+migrate-down: ## Rollback database migrations
+	@echo "$(GREEN)Rolling back database migrations...$(RESET)"
+	@go run ./cmd/migrate -down
+
+.PHONY: db-reset
+db-reset: ## Reset database completely
+	@echo "$(GREEN)Resetting database...$(RESET)"
+	@docker-compose down -v postgres
+	@docker-compose up -d postgres
+	@sleep 10
+	@$(MAKE) migrate
+
+.PHONY: db-shell
+db-shell: ## Open database shell
+	@docker-compose exec postgres psql -U postgres -d api_server
+
+##@ Documentation
+
+.PHONY: docs
+docs: ## Generate documentation
+	@echo "$(GREEN)Generating documentation...$(RESET)"
+	@$(MAKE) docs-api
+	@$(MAKE) docs-swagger
+
+.PHONY: docs-api
+docs-api: ## Generate API documentation
+	@echo "$(GREEN)Generating API documentation...$(RESET)"
+	@swag init -g cmd/server/main.go -o docs/swagger
+
+.PHONY: docs-swagger
+docs-swagger: ## Start Swagger UI server
+	@echo "$(GREEN)Starting Swagger UI...$(RESET)"
+	@docker run -d -p 8090:8080 -e SWAGGER_JSON=/docs/swagger.json -v $(PWD)/docs/swagger:/docs swaggerapi/swagger-ui
+
+.PHONY: docs-serve
+docs-serve: ## Serve documentation locally
+	@echo "$(GREEN)Serving documentation...$(RESET)"
+	@cd docs && python3 -m http.server 8080
+
+##@ Deployment
+
+.PHONY: deploy-dev
+deploy-dev: ## Deploy to development environment
+	@echo "$(GREEN)Deploying to development...$(RESET)"
+	@docker-compose -f deployments/docker-compose/development.yml up -d
+
+.PHONY: deploy-staging
+deploy-staging: ## Deploy to staging environment
+	@echo "$(GREEN)Deploying to staging...$(RESET)"
+	@docker-compose -f deployments/docker-compose/staging.yml up -d
+
+.PHONY: deploy-prod
+deploy-prod: build-prod docker-build docker-push ## Deploy to production
+	@echo "$(GREEN)Deploying to production...$(RESET)"
+	@kubectl apply -f deployments/k8s/
+
+.PHONY: k8s-deploy
+k8s-deploy: ## Deploy to Kubernetes
+	@echo "$(GREEN)Deploying to Kubernetes...$(RESET)"
+	@kubectl apply -f deployments/k8s/
+
+.PHONY: k8s-delete
+k8s-delete: ## Delete from Kubernetes
+	@echo "$(GREEN)Deleting from Kubernetes...$(RESET)"
+	@kubectl delete -f deployments/k8s/
+
+##@ Monitoring
+
+.PHONY: health
+health: ## Check health of all services
+	@echo "$(GREEN)Checking health of all services...$(RESET)"
+	@for port in $(SERVICE_PORTS); do \
+		echo "Checking service on port $$port..."; \
+		curl -s http://localhost:$$port/health | jq . || echo "Service on port $$port is not responding"; \
+	done
+
+.PHONY: logs
+logs: ## Show logs from all services
+	@echo "$(GREEN)Showing logs...$(RESET)"
+	@docker-compose logs -f
+
+.PHONY: metrics
+metrics: ## Show metrics
+	@echo "$(GREEN)Showing metrics...$(RESET)"
+	@curl -s http://localhost:9090/metrics
+
+##@ Utilities
+
+.PHONY: generate
+generate: ## Run go generate
+	@echo "$(GREEN)Running go generate...$(RESET)"
+	@go generate ./...
+	@cd shared && go generate ./... && cd ..
+	@for service in $(SERVICES); do \
+		cd services/$$service && go generate ./... && cd ../..; \
+	done
+
+.PHONY: tidy
+tidy: ## Tidy modules
+	@echo "$(GREEN)Tidying modules...$(RESET)"
+	@go mod tidy
+	@cd shared && go mod tidy && cd ..
+	@for service in $(SERVICES); do \
+		cd services/$$service && go mod tidy && cd ../..; \
+	done
+
+.PHONY: install-local
+install-local: build ## Install binaries locally
+	@echo "$(GREEN)Installing binaries locally...$(RESET)"
+	@for service in $(SERVICES); do \
+		cp $(BIN_DIR)/$$service $(GOPATH)/bin/; \
+	done
+
+.PHONY: quick-start
+quick-start: setup-dev db-setup ## Quick start for new developers
+	@echo "$(GREEN)Quick start completed!$(RESET)"
+	@echo "$(YELLOW)Run 'make run' to start the monolith or 'make run-all' to start all services$(RESET)"
+
+# Service-specific targets
+.PHONY: run-gateway run-auth run-user
+run-gateway: ## Run API Gateway
+	@$(MAKE) run-service SERVICE=api-gateway
+
+run-auth: ## Run Auth Service
+	@$(MAKE) run-service SERVICE=auth-service
+
+run-user: ## Run User Service
+	@$(MAKE) run-service SERVICE=user-service

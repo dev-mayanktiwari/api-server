@@ -2,94 +2,241 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: user-service
-  namespace: microservices
+  namespace: api-server
   labels:
     app: user-service
+    component: microservice
+    version: v1.0.0
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app: user-service
+      component: microservice
   template:
     metadata:
       labels:
         app: user-service
+        component: microservice
+        version: v1.0.0
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
       containers:
       - name: user-service
-        image: user-service:latest
+        image: api-server/user-service:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8082
+          name: http
+          protocol: TCP
         env:
-        - name: USER_SERVER_PORT
+        # Service Configuration
+        - name: USER_SERVICE_ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: ENVIRONMENT
+        - name: USER_SERVICE_SERVER_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: SERVER_HOST
+        - name: USER_SERVICE_SERVER_PORT
           value: "8082"
-        - name: USER_SERVER_MODE
+        
+        # Database Configuration
+        - name: USER_SERVICE_DATABASE_HOST
           valueFrom:
             configMapKeyRef:
-              name: app-config
-              key: GIN_MODE
-        - name: USER_DATABASE_HOST
+              name: api-server-config
+              key: POSTGRES_HOST
+        - name: USER_SERVICE_DATABASE_PORT
           valueFrom:
             configMapKeyRef:
-              name: app-config
-              key: DB_HOST
-        - name: USER_DATABASE_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: DB_PORT
-        - name: USER_DATABASE_USER
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: DB_USER
-        - name: USER_DATABASE_PASSWORD
+              name: api-server-config
+              key: POSTGRES_PORT
+        - name: USER_SERVICE_DATABASE_USERNAME
           valueFrom:
             secretKeyRef:
-              name: app-secrets
-              key: DB_PASSWORD
-        - name: USER_DATABASE_NAME
+              name: api-server-secrets
+              key: POSTGRES_USER
+        - name: USER_SERVICE_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: api-server-secrets
+              key: POSTGRES_PASSWORD
+        - name: USER_SERVICE_DATABASE_DATABASE
           valueFrom:
             configMapKeyRef:
-              name: app-config
-              key: DB_NAME_USER
-        - name: USER_DATABASE_SSL_MODE
+              name: api-server-config
+              key: POSTGRES_DB
+        - name: USER_SERVICE_DATABASE_SSLMODE
+          value: "require"
+        
+        # JWT Configuration
+        - name: USER_SERVICE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: api-server-secrets
+              key: JWT_SECRET
+        - name: USER_SERVICE_JWT_ISSUER
           valueFrom:
             configMapKeyRef:
-              name: app-config
-              key: DB_SSL_MODE
-        - name: USER_SERVICES_AUTH_SERVICE
+              name: api-server-config
+              key: JWT_ISSUER
+        - name: USER_SERVICE_JWT_EXPIRATIONTIME
           valueFrom:
             configMapKeyRef:
-              name: app-config
-              key: AUTH_SERVICE_URL
-        - name: USER_LOGGER_LEVEL
+              name: api-server-config
+              key: JWT_EXPIRATION_TIME
+        - name: USER_SERVICE_JWT_REFRESHTIME
           valueFrom:
             configMapKeyRef:
-              name: app-config
+              name: api-server-config
+              key: JWT_REFRESH_TIME
+        - name: USER_SERVICE_JWT_ALGORITHM
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: JWT_ALGORITHM
+        
+        # Redis Configuration
+        - name: USER_SERVICE_REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: REDIS_HOST
+        - name: USER_SERVICE_REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: REDIS_PORT
+        - name: USER_SERVICE_REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: api-server-secrets
+              key: REDIS_PASSWORD
+        
+        # Logging Configuration
+        - name: USER_SERVICE_LOGGING_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
               key: LOG_LEVEL
-        - name: USER_LOGGER_FORMAT
+        - name: USER_SERVICE_LOGGING_FORMAT
           valueFrom:
             configMapKeyRef:
-              name: app-config
+              name: api-server-config
               key: LOG_FORMAT
+        
+        # Rate Limiting Configuration
+        - name: USER_SERVICE_RATELIMIT_REQUESTSPERSECOND
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: RATE_LIMIT_REQUESTS_PER_SECOND
+        - name: USER_SERVICE_RATELIMIT_BURSTSIZE
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: RATE_LIMIT_BURST_SIZE
+        - name: USER_SERVICE_RATELIMIT_CLEANUPINTERVAL
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: RATE_LIMIT_CLEANUP_INTERVAL
+        
+        # Server Timeouts
+        - name: USER_SERVICE_SERVER_READTIMEOUT
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: SERVER_READ_TIMEOUT
+        - name: USER_SERVICE_SERVER_WRITETIMEOUT
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: SERVER_WRITE_TIMEOUT
+        - name: USER_SERVICE_SERVER_IDLETIMEOUT
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: SERVER_IDLE_TIMEOUT
+        - name: USER_SERVICE_SERVER_SHUTDOWNTIMEOUT
+          valueFrom:
+            configMapKeyRef:
+              name: api-server-config
+              key: SERVER_SHUTDOWN_TIMEOUT
+        
         resources:
           requests:
-            memory: "128Mi"
+            memory: "256Mi"
             cpu: "100m"
           limits:
-            memory: "256Mi"
-            cpu: "200m"
+            memory: "512Mi"
+            cpu: "500m"
+        
         livenessProbe:
           httpGet:
             path: /health
             port: 8082
+            scheme: HTTP
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        
         readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8082
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+          successThreshold: 1
+        
+        startupProbe:
           httpGet:
             path: /health
             port: 8082
-          initialDelaySeconds: 5
+            scheme: HTTP
+          initialDelaySeconds: 10
           periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 12
+          successThreshold: 1
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+        
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        - name: cache-volume
+          mountPath: /app/cache
+      
+      volumes:
+      - name: tmp-volume
+        emptyDir: {}
+      - name: cache-volume
+        emptyDir: {}
+      
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30

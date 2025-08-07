@@ -1,113 +1,199 @@
 version: '3.8'
 
 services:
-  # Database
+  # PostgreSQL Database (Shared)
   postgres:
-    image: postgres:15
-    container_name: microservices-postgres
+    image: postgres:15-alpine
+    container_name: api-server-postgres
     environment:
+      POSTGRES_DB: api_server
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_MULTIPLE_DATABASES: auth_db,user_db
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     networks:
-      - microservices
+      - api-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d api_server"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # Redis (Shared for caching and rate limiting)
+  redis:
+    image: redis:7-alpine
+    container_name: api-server-redis
+    command: redis-server --appendonly yes --requirepass redis_password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - api-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
   # Auth Service
   auth-service:
-    build: 
-      context: ./services/auth-service
-      dockerfile: Dockerfile
-    container_name: microservices-auth
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    container_name: api-server-auth-service
     environment:
-      - AUTH_SERVER_PORT=8081
-      - AUTH_SERVER_MODE=debug
-      - AUTH_DATABASE_HOST=postgres
-      - AUTH_DATABASE_PORT=5432
-      - AUTH_DATABASE_USER=postgres
-      - AUTH_DATABASE_PASSWORD=password
-      - AUTH_DATABASE_NAME=auth_db
-      - AUTH_DATABASE_SSL_MODE=disable
-      - AUTH_JWT_SECRET_KEY=your-super-secret-jwt-key-change-in-production
-      - AUTH_JWT_ACCESS_TOKEN_DURATION=15
-      - AUTH_JWT_REFRESH_TOKEN_DURATION=168
-      - AUTH_LOGGER_LEVEL=debug
-      - AUTH_LOGGER_FORMAT=console
+      - AUTH_SERVICE_ENVIRONMENT=development
+      - AUTH_SERVICE_DATABASE_HOST=postgres
+      - AUTH_SERVICE_DATABASE_PORT=5432
+      - AUTH_SERVICE_DATABASE_USERNAME=postgres
+      - AUTH_SERVICE_DATABASE_PASSWORD=postgres
+      - AUTH_SERVICE_DATABASE_DATABASE=api_server
+      - AUTH_SERVICE_DATABASE_SSLMODE=disable
+      - AUTH_SERVICE_JWT_SECRET=development-auth-secret-key-change-in-production
+      - AUTH_SERVICE_JWT_ISSUER=api-server-auth
+      - AUTH_SERVICE_REDIS_HOST=redis
+      - AUTH_SERVICE_REDIS_PORT=6379
+      - AUTH_SERVICE_REDIS_PASSWORD=redis_password
     ports:
       - "8081:8081"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
-      - microservices
+      - api-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
 
   # User Service
   user-service:
     build:
-      context: ./services/user-service
-      dockerfile: Dockerfile
-    container_name: microservices-user
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    container_name: api-server-user-service
     environment:
-      - USER_SERVER_PORT=8082
-      - USER_SERVER_MODE=debug
-      - USER_DATABASE_HOST=postgres
-      - USER_DATABASE_PORT=5432
-      - USER_DATABASE_USER=postgres
-      - USER_DATABASE_PASSWORD=password
-      - USER_DATABASE_NAME=user_db
-      - USER_DATABASE_SSL_MODE=disable
-      - USER_SERVICES_AUTH_SERVICE=http://auth-service:8081
-      - USER_LOGGER_LEVEL=debug
-      - USER_LOGGER_FORMAT=console
+      - USER_SERVICE_ENVIRONMENT=development
+      - USER_SERVICE_DATABASE_HOST=postgres
+      - USER_SERVICE_DATABASE_PORT=5432
+      - USER_SERVICE_DATABASE_USERNAME=postgres
+      - USER_SERVICE_DATABASE_PASSWORD=postgres
+      - USER_SERVICE_DATABASE_DATABASE=api_server
+      - USER_SERVICE_DATABASE_SSLMODE=disable
+      - USER_SERVICE_REDIS_HOST=redis
+      - USER_SERVICE_REDIS_PORT=6379
+      - USER_SERVICE_REDIS_PASSWORD=redis_password
     ports:
       - "8082:8082"
     depends_on:
       postgres:
         condition: service_healthy
-      auth-service:
-        condition: service_started
+      redis:
+        condition: service_healthy
     networks:
-      - microservices
+      - api-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
 
   # API Gateway
   api-gateway:
     build:
-      context: ./services/api-gateway
-      dockerfile: Dockerfile
-    container_name: microservices-gateway
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: api-server-gateway
     environment:
-      - GATEWAY_SERVER_PORT=8080
-      - GATEWAY_SERVER_MODE=debug
-      - GATEWAY_SERVICES_AUTH_SERVICE=http://auth-service:8081
-      - GATEWAY_SERVICES_USER_SERVICE=http://user-service:8082
-      - GATEWAY_LOGGER_LEVEL=debug
-      - GATEWAY_LOGGER_FORMAT=console
-      - GATEWAY_CORS_ALLOW_ORIGINS=*
-      - GATEWAY_CORS_ALLOW_CREDENTIALS=true
-      - GATEWAY_CORS_MAX_AGE=86400
+      - API_GATEWAY_ENVIRONMENT=development
+      - API_GATEWAY_JWT_SECRET=development-auth-secret-key-change-in-production
+      - API_GATEWAY_JWT_ISSUER=api-server-auth
+      - AUTH_SERVICE_URL=http://auth-service:8081
+      - USER_SERVICE_URL=http://user-service:8082
     ports:
       - "8080:8080"
     depends_on:
       - auth-service
       - user-service
     networks:
-      - microservices
+      - api-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
+
+  # Nginx Gateway (Load Balancer)
+  nginx-gateway:
+    image: nginx:alpine
+    container_name: api-server-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api-gateway
+      - auth-service
+      - user-service
+    networks:
+      - api-network
+    restart: unless-stopped
+
+  # Development Tools
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: api-server-pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@dev.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - api-network
+    profiles: ["dev-tools"]
+
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: api-server-redis-insight
+    ports:
+      - "8001:8001"
+    depends_on:
+      - redis
+    networks:
+      - api-network
+    profiles: ["dev-tools"]
+
+networks:
+  api-network:
+    driver: bridge
+    name: api-server-network
 
 volumes:
   postgres_data:
-
-networks:
-  microservices:
-    driver: bridge
+    driver: local
+    name: api-server-postgres-data
+  redis_data:
+    driver: local
+    name: api-server-redis-data

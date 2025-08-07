@@ -1,0 +1,71 @@
+# Git files
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Documentation
+README*.md
+CHANGELOG.md
+*.md
+docs/
+
+# Test files
+*_test.go
+test/
+tests/
+coverage.out
+coverage.html
+
+# Development files
+.env
+.env.*
+!.env.example
+*.log
+tmp/
+temp/
+.tmp/
+
+# Build artifacts
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Docker files
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Kubernetes files
+k8s/
+*.yaml
+*.yml
+
+# Scripts
+scripts/
+Makefile*
+
+# Cache directories
+.cache/
+.npm/
+node_modules/

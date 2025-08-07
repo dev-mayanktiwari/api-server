@@ -2,49 +2,91 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgres
-  namespace: microservices
+  namespace: api-server
   labels:
     app: postgres
+    component: database
+    version: v1.0.0
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: postgres
+      component: database
   template:
     metadata:
       labels:
         app: postgres
+        component: database
+        version: v1.0.0
     spec:
+      securityContext:
+        fsGroup: 999
       containers:
       - name: postgres
-        image: postgres:15
+        image: postgres:15-alpine
         ports:
         - containerPort: 5432
+          name: postgres
         env:
-        - name: POSTGRES_USER
+        - name: POSTGRES_DB
           valueFrom:
             configMapKeyRef:
-              name: app-config
-              key: DB_USER
+              name: api-server-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: api-server-secrets
+              key: POSTGRES_USER
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: app-secrets
-              key: DB_PASSWORD
-        - name: POSTGRES_MULTIPLE_DATABASES
-          value: "auth_db,user_db"
+              name: api-server-secrets
+              key: POSTGRES_PASSWORD
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
         volumeMounts:
         - name: postgres-storage
           mountPath: /var/lib/postgresql/data
         - name: postgres-initdb
           mountPath: /docker-entrypoint-initdb.d
+        - name: postgres-config
+          mountPath: /etc/postgresql/postgresql.conf
+          subPath: postgresql.conf
         resources:
           requests:
-            memory: "256Mi"
+            memory: "512Mi"
             cpu: "250m"
           limits:
-            memory: "512Mi"
+            memory: "1Gi"
             cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - $(POSTGRES_USER)
+            - -d
+            - $(POSTGRES_DB)
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - $(POSTGRES_USER)
+            - -d
+            - $(POSTGRES_DB)
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
       volumes:
       - name: postgres-storage
         persistentVolumeClaim:
@@ -52,3 +94,6 @@ spec:
       - name: postgres-initdb
         configMap:
           name: postgres-initdb
+      - name: postgres-config
+        configMap:
+          name: postgres-config

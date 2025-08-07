@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -9,104 +10,138 @@ import (
 	"syscall"
 	"time"
 
-	"api-gateway/internal/config"
-	"api-gateway/internal/handler"
-	"api-gateway/internal/middleware"
-	"api-gateway/pkg/logger"
-
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/config"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/middleware"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/auth"
+	"github.com/dev-mayanktiwari/api-server/services/api-gateway/internal/infrastructure/http/handlers"
+	"github.com/dev-mayanktiwari/api-server/services/api-gateway/internal/application/services"
 )
 
 func main() {
-	cfg, err := config.Load()
+	// Load configuration
+	cfg, err := config.Load("API_GATEWAY")
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	logConfig := logger.Config{
-		Level:  cfg.Logger.Level,
-		Format: cfg.Logger.Format,
+	// Initialize logger
+	appLogger := logger.New(&cfg.Logging)
+	appLogger.Info("Starting API Gateway...")
+
+	// Initialize JWT manager (for auth validation)
+	jwtManager := auth.NewJWTManager(&cfg.JWT, appLogger)
+
+	// Initialize services
+	proxyService := services.NewProxyService(appLogger)
+
+	// Initialize handlers
+	gatewayHandler := handlers.NewGatewayHandler(proxyService, appLogger)
+
+	// Setup router
+	if cfg.Environment == "production" {
+		gin.SetMode(gin.ReleaseMode)
 	}
 
-	if err := logger.InitGlobal(logConfig); err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
-	}
-
-	appLogger := logger.GetGlobal()
-
-	appLogger.WithFields(map[string]interface{}{
-		"service": "api-gateway",
-		"version": "1.0.0",
-		"port":    cfg.Server.Port,
-	}).Info("Starting API Gateway")
-
-	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
-
-	corsConfig := cors.Config{
-		AllowOrigins:     cfg.CORS.AllowOrigins,
-		AllowMethods:     cfg.CORS.AllowMethods,
-		AllowHeaders:     cfg.CORS.AllowHeaders,
-		ExposeHeaders:    cfg.CORS.ExposeHeaders,
-		AllowCredentials: cfg.CORS.AllowCredentials,
-		MaxAge:           time.Duration(cfg.CORS.MaxAge) * time.Second,
-	}
-	router.Use(cors.New(corsConfig))
-
-	router.Use(middleware.RequestID())
-	router.Use(middleware.LoggingMiddleware(appLogger))
-	router.Use(middleware.RateLimitMiddleware())
 	router.Use(gin.Recovery())
+	router.Use(middleware.CORS())
+	router.Use(middleware.RequestID())
+	router.Use(middleware.Logger(appLogger))
+	router.Use(middleware.RateLimit())
 
-	healthHandler := handler.NewHealthHandler(cfg, appLogger)
-	router.GET("/health", healthHandler.Health)
-	router.GET("/ready", healthHandler.Ready)
+	// Health endpoints
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "healthy",
+			"service":   "api-gateway",
+			"version":   cfg.Version,
+			"timestamp": time.Now().UTC(),
+		})
+	})
 
-	v1 := router.Group("/api/v1")
+	router.GET("/ready", func(c *gin.Context) {
+		// Check if downstream services are available
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "ready",
+			"service":   "api-gateway",
+			"timestamp": time.Now().UTC(),
+		})
+	})
+
+	// API routes with service routing
+	api := router.Group("/api/v1")
 	{
-		auth := v1.Group("/auth")
+		// Auth service routes (public)
+		auth := api.Group("/auth")
 		{
-			auth.POST("/register", middleware.ProxyToService(cfg.Services.UserService, appLogger))
-			auth.POST("/login", middleware.ProxyToService(cfg.Services.UserService, appLogger))
-			auth.POST("/refresh", middleware.ProxyToService(cfg.Services.AuthService, appLogger))
-			auth.POST("/validate", middleware.ProxyToService(cfg.Services.AuthService, appLogger))
+			auth.POST("/login", gatewayHandler.ProxyToAuthService)
+			auth.POST("/refresh", gatewayHandler.ProxyToAuthService)
+			auth.POST("/logout", gatewayHandler.ProxyToAuthService)
+			auth.POST("/validate", gatewayHandler.ProxyToAuthService)
+			auth.GET("/me", middleware.JWTAuth(jwtManager), gatewayHandler.ProxyToAuthService)
 		}
 
-		users := v1.Group("/users")
-		users.Use(middleware.AuthMiddleware(cfg, appLogger))
+		// User service routes
+		users := api.Group("/users")
 		{
-			users.GET("", middleware.RoleMiddleware("admin"), middleware.ProxyToService(cfg.Services.UserService, appLogger))
-			users.GET("/:id", middleware.ProxyToService(cfg.Services.UserService, appLogger))
-			users.PUT("/:id", middleware.ProxyToService(cfg.Services.UserService, appLogger))
-			users.DELETE("/:id", middleware.RoleMiddleware("admin"), middleware.ProxyToService(cfg.Services.UserService, appLogger))
-			users.POST("/:id/change-password", middleware.ProxyToService(cfg.Services.UserService, appLogger))
+			// Public routes
+			users.POST("/register", gatewayHandler.ProxyToUserService)
+			users.POST("/login", gatewayHandler.ProxyToAuthService) // Login goes to auth service
+
+			// Protected routes
+			protected := users.Use(middleware.JWTAuth(jwtManager))
+			{
+				protected.GET("/profile", gatewayHandler.ProxyToUserService)
+				protected.PUT("/profile", gatewayHandler.ProxyToUserService)
+				protected.POST("/change-password", gatewayHandler.ProxyToUserService)
+			}
+
+			// Admin routes
+			admin := users.Use(middleware.JWTAuth(jwtManager), middleware.RequireRole("admin"))
+			{
+				admin.GET("", gatewayHandler.ProxyToUserService)           // List users
+				admin.GET("/:id", gatewayHandler.ProxyToUserService)       // Get user by ID
+				admin.PUT("/:id", gatewayHandler.ProxyToUserService)       // Update user
+				admin.DELETE("/:id", gatewayHandler.ProxyToUserService)    // Delete user
+				admin.GET("/statistics", gatewayHandler.ProxyToUserService) // Get statistics
+			}
 		}
 	}
 
-	srv := &http.Server{
-		Addr:    cfg.GetServerAddress(),
-		Handler: router,
+	// Start server
+	server := &http.Server{
+		Addr:           fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler:        router,
+		ReadTimeout:    cfg.Server.ReadTimeout,
+		WriteTimeout:   cfg.Server.WriteTimeout,
+		IdleTimeout:    cfg.Server.IdleTimeout,
+		MaxHeaderBytes: 1 << 20, // 1MB
 	}
 
+	// Graceful shutdown
 	go func() {
-		appLogger.WithField("address", cfg.GetServerAddress()).Info("API Gateway started")
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		appLogger.WithField("port", cfg.Server.Port).Info("API Gateway started successfully")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			appLogger.WithError(err).Fatal("Failed to start server")
 		}
 	}()
 
+	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	appLogger.Info("Shutting down API Gateway...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
-		appLogger.WithError(err).Fatal("Server forced to shutdown")
+	if err := server.Shutdown(ctx); err != nil {
+		appLogger.WithError(err).Error("Failed to shutdown server gracefully")
 	}
 
 	appLogger.Info("API Gateway stopped")

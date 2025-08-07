@@ -10,81 +10,142 @@ import (
 	"syscall"
 	"time"
 
-	"auth-service/internal/config"
-	"auth-service/internal/handler"
-	"auth-service/internal/service"
-	"auth-service/pkg/logger"
-
 	"github.com/gin-gonic/gin"
+
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/config"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/database"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/middleware"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/auth"
+	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/infrastructure/http/handlers"
+	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/infrastructure/database"
+	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/application/services"
 )
 
 func main() {
-	cfg, err := config.Load()
+	// Load configuration
+	cfg, err := config.Load("AUTH_SERVICE")
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	logConfig := logger.Config{
-		Level:  cfg.Logger.Level,
-		Format: cfg.Logger.Format,
+	// Initialize logger
+	appLogger := logger.New(&cfg.Logging)
+	appLogger.Info("Starting Auth Service...")
+
+	// Initialize database
+	db, err := database.NewPostgreSQL(&cfg.Database)
+	if err != nil {
+		appLogger.WithError(err).Fatal("Failed to connect to database")
+	}
+	defer func() {
+		if err := database.Close(db); err != nil {
+			appLogger.WithError(err).Error("Failed to close database connection")
+		}
+	}()
+
+	// Auto-migrate tables
+	if err := database.AutoMigrate(db, &database.TokenModel{}); err != nil {
+		appLogger.WithError(err).Fatal("Failed to migrate database")
 	}
 
-	if err := logger.InitGlobal(logConfig); err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+	// Initialize JWT manager
+	jwtManager := auth.NewJWTManager(&cfg.JWT, appLogger)
+
+	// Initialize repositories
+	tokenRepo := database.NewTokenRepository(db, appLogger)
+
+	// Initialize services
+	authService := services.NewAuthApplicationService(tokenRepo, jwtManager, appLogger)
+
+	// Initialize handlers
+	authHandler := handlers.NewAuthHandler(authService, appLogger)
+
+	// Setup router
+	if cfg.Environment == "production" {
+		gin.SetMode(gin.ReleaseMode)
 	}
 
-	appLogger := logger.GetGlobal()
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(middleware.CORS())
+	router.Use(middleware.RequestID())
+	router.Use(middleware.Logger(appLogger))
+	router.Use(middleware.RateLimit())
 
-	appLogger.WithFields(map[string]interface{}{
-		"service": "auth-service",
-		"version": "1.0.0",
-		"port":    cfg.Server.Port,
-	}).Info("Starting Auth Service")
-
-	authService := service.NewAuthService(cfg, appLogger)
-	authHandler := handler.NewAuthHandler(authService, appLogger)
-
-	gin.SetMode(cfg.Server.Mode)
-	router := gin.Default()
-
-	v1 := router.Group("/api/v1")
-	{
-		v1.POST("/auth/generate", authHandler.GenerateTokens)
-		v1.POST("/auth/validate", authHandler.ValidateToken)
-		v1.POST("/auth/refresh", authHandler.RefreshTokens)
-	}
-
+	// Health endpoints
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"status":  "healthy",
-			"service": "auth-service",
-			"time":    time.Now(),
+			"status":    "healthy",
+			"service":   "auth-service",
+			"version":   cfg.Version,
+			"timestamp": time.Now().UTC(),
 		})
 	})
 
-	srv := &http.Server{
-		Addr:    cfg.GetServerAddress(),
-		Handler: router,
+	router.GET("/ready", func(c *gin.Context) {
+		// Check database connectivity
+		if err := database.Ping(db); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status": "not ready",
+				"checks": gin.H{
+					"database": gin.H{"status": "unhealthy", "error": err.Error()},
+				},
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ready",
+			"service": "auth-service",
+			"checks": gin.H{
+				"database": gin.H{"status": "healthy"},
+			},
+			"timestamp": time.Now().UTC(),
+		})
+	})
+
+	// API routes
+	v1 := router.Group("/api/v1/auth")
+	{
+		v1.POST("/login", authHandler.Login)
+		v1.POST("/refresh", authHandler.RefreshToken)
+		v1.POST("/logout", authHandler.Logout)
+		v1.POST("/validate", authHandler.ValidateToken)
+		v1.GET("/me", middleware.JWTAuth(jwtManager), authHandler.GetCurrentUser)
 	}
 
+	// Start server
+	server := &http.Server{
+		Addr:           fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler:        router,
+		ReadTimeout:    cfg.Server.ReadTimeout,
+		WriteTimeout:   cfg.Server.WriteTimeout,
+		IdleTimeout:    cfg.Server.IdleTimeout,
+		MaxHeaderBytes: 1 << 20, // 1MB
+	}
+
+	// Graceful shutdown
 	go func() {
-		appLogger.WithField("address", cfg.GetServerAddress()).Info("Auth Service started")
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		appLogger.WithField("port", cfg.Server.Port).Info("Auth Service started successfully")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			appLogger.WithError(err).Fatal("Failed to start server")
 		}
 	}()
 
+	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	appLogger.Info("Shutting down Auth Service...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
-		appLogger.WithError(err).Fatal("Server forced to shutdown")
+	if err := server.Shutdown(ctx); err != nil {
+		appLogger.WithError(err).Error("Failed to shutdown server gracefully")
 	}
 
 	appLogger.Info("Auth Service stopped")
