@@ -13,39 +13,41 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/config"
-	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/database"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/middleware"
-	"github.com/dev-mayanktiwari/api-server/shared/pkg/auth"
 	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/infrastructure/http/handlers"
-	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/infrastructure/database"
 	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/application/services"
 )
 
 func main() {
 	// Load configuration
-	cfg, err := config.Load("AUTH_SERVICE")
+	cfg := config.New(config.DefaultOptions())
+	err := config.LoadFromFile("AUTH_SERVICE", cfg)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
 	// Initialize logger
-	appLogger := logger.New(&cfg.Logging)
+	appLogger, err := logger.New(&cfg.Logging)
+	if err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
 	appLogger.Info("Starting Auth Service...")
 
 	// Initialize database
-	db, err := database.NewPostgreSQL(&cfg.Database)
+	db, err := database.Connect(&cfg.Database, appLogger)
 	if err != nil {
 		appLogger.WithError(err).Fatal("Failed to connect to database")
 	}
 	defer func() {
-		if err := database.Close(db); err != nil {
+		if err := db.Close(); err != nil {
 			appLogger.WithError(err).Error("Failed to close database connection")
 		}
 	}()
 
 	// Auto-migrate tables
-	if err := database.AutoMigrate(db, &database.TokenModel{}); err != nil {
+	if err := db.Migrate(&database.TokenModel{}); err != nil {
 		appLogger.WithError(err).Fatal("Failed to migrate database")
 	}
 
@@ -53,7 +55,7 @@ func main() {
 	jwtManager := auth.NewJWTManager(&cfg.JWT, appLogger)
 
 	// Initialize repositories
-	tokenRepo := database.NewTokenRepository(db, appLogger)
+	tokenRepo := database.NewRepository(db)
 
 	// Initialize services
 	authService := services.NewAuthApplicationService(tokenRepo, jwtManager, appLogger)
@@ -85,7 +87,7 @@ func main() {
 
 	router.GET("/ready", func(c *gin.Context) {
 		// Check database connectivity
-		if err := database.Ping(db); err != nil {
+		if err := db.HealthCheck(c.Request.Context()); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"status": "not ready",
 				"checks": gin.H{
@@ -127,7 +129,9 @@ func main() {
 
 	// Graceful shutdown
 	go func() {
-		appLogger.WithField("port", cfg.Server.Port).Info("Auth Service started successfully")
+		appLogger.WithFields(logger.Fields{
+			"port": cfg.Server.Port,
+		}).Info("Auth Service started successfully")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			appLogger.WithError(err).Fatal("Failed to start server")
 		}

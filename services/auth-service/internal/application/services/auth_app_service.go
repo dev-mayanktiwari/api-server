@@ -2,16 +2,15 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
+	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/application/dto"
+	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/domain/entities"
+	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/domain/repositories"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/auth"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/errors"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
-	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/domain/entities"
-	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/domain/repositories"
-	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/application/dto"
 )
 
 // AuthApplicationService provides authentication operations
@@ -60,7 +59,9 @@ func (s *AuthApplicationService) Login(ctx context.Context, req *dto.LoginReques
 	}
 
 	if !isValid {
-		s.logger.WithField("email", req.Email).Warn("Invalid login attempt")
+		s.logger.WithFields(logger.Fields{
+			"email": req.Email,
+		}).Warn("Invalid login attempt")
 		return nil, errors.Unauthorized("Invalid email or password")
 	}
 
@@ -121,7 +122,9 @@ func (s *AuthApplicationService) RefreshToken(ctx context.Context, req *dto.Refr
 	}
 
 	if !exists {
-		s.logger.WithField("user_id", claims.UserID).Warn("Refresh token not found in database")
+		s.logger.WithFields(logger.Fields{
+			"user_id": claims.UserID,
+		}).Warn("Refresh token not found in database")
 		return nil, errors.Unauthorized("Invalid refresh token")
 	}
 
@@ -169,7 +172,9 @@ func (s *AuthApplicationService) Logout(ctx context.Context, req *dto.LogoutRequ
 		}
 	}
 
-	s.logger.WithField("user_id", claims.UserID).Info("User logged out successfully")
+	s.logger.WithFields(logger.Fields{
+		"user_id": claims.UserID,
+	}).Info("User logged out successfully")
 	return nil
 }
 

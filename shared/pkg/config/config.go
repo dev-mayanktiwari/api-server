@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 )
 
@@ -119,7 +120,7 @@ func (m *Manager) Watch(config interface{}, callback func(config interface{})) e
 	m.mutex.Unlock()
 	
 	m.viper.WatchConfig()
-	m.viper.OnConfigChange(func(e interface{}) {
+	m.viper.OnConfigChange(func(e fsnotify.Event) {
 		m.mutex.RLock()
 		defer m.mutex.RUnlock()
 		

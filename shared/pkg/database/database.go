@@ -58,7 +58,7 @@ func Connect(cfg *Config, log *logger.Logger) (*DB, error) {
 	
 	// Configure GORM logger
 	var gormLogLevel gormLogger.LogLevel
-	switch log.GetConfig().Level {
+	switch log.GetLevel() {
 	case "debug":
 		gormLogLevel = gormLogger.Info
 	case "info":

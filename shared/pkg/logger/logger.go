@@ -302,6 +302,11 @@ func (l *Logger) Close() error {
 	return l.Sync()
 }
 
+// GetLevel returns the current log level
+func (l *Logger) GetLevel() string {
+	return l.config.Level
+}
+
 // Package-level convenience functions using default logger
 
 // Info logs at info level using default logger

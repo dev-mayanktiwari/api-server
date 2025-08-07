@@ -6,10 +6,10 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/dev-mayanktiwari/api-server/shared/pkg/database"
-	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
 	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/domain/entities"
 	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/domain/repositories"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/database"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
 )
 
 // TokenModel represents the database model for refresh tokens
@@ -166,7 +166,9 @@ func (r *tokenRepository) CleanupExpiredTokens(ctx context.Context) error {
 		return result.Error
 	}
 
-	r.logger.WithContext(ctx).WithField("affected_rows", result.RowsAffected).
+	r.logger.WithContext(ctx).WithFields(logger.Fields{
+		"affected_rows": result.RowsAffected,
+	}).
 		Info("Expired tokens cleaned up")
 
 	return nil

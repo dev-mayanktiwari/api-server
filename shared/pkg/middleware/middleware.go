@@ -79,7 +79,7 @@ func Logger(log *logger.Logger) gin.HandlerFunc {
 // Recovery middleware handles panics and returns proper error responses
 func Recovery(log *logger.Logger) gin.HandlerFunc {
 	return gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
-		err := fmt.Errorf("panic recovered: %v", recovered)
+		_ = fmt.Errorf("panic recovered: %v", recovered)
 		
 		log.WithFields(logger.Fields{
 			"request_id": c.GetString("request_id"),
