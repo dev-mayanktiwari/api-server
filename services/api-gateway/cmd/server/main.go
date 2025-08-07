@@ -20,15 +20,60 @@ import (
 	"github.com/dev-mayanktiwari/api-server/services/api-gateway/internal/application/services"
 )
 
+// Config represents the application configuration
+type Config struct {
+	config.BaseConfig `mapstructure:",squash"`
+	Server            config.ServerConfig     `mapstructure:"server" json:"server" yaml:"server"`
+	JWT               config.JWTConfig        `mapstructure:"jwt" json:"jwt" yaml:"jwt"`
+	Logging           *logger.Config          `mapstructure:"logging" json:"logging" yaml:"logging"`
+	RateLimit         config.RateLimitConfig  `mapstructure:"rate_limit" json:"rate_limit" yaml:"rate_limit"`
+	CORS              config.CORSConfig       `mapstructure:"cors" json:"cors" yaml:"cors"`
+	Services          ServiceURLs             `mapstructure:"services" json:"services" yaml:"services"`
+}
+
+// ServiceURLs contains URLs for downstream services
+type ServiceURLs struct {
+	AuthServiceURL string `mapstructure:"auth_service_url" json:"auth_service_url" yaml:"auth_service_url"`
+	UserServiceURL string `mapstructure:"user_service_url" json:"user_service_url" yaml:"user_service_url"`
+}
+
 func main() {
+	// Create configuration manager
+	configManager := config.New(&config.Options{
+		ConfigName:  "config",
+		ConfigPaths: []string{".", "./configs/api-gateway", "../configs/api-gateway"},
+		ConfigType:  "yaml",
+		EnvPrefix:   "API_GATEWAY",
+	})
+
 	// Load configuration
-	cfg, err := config.Load("API_GATEWAY")
-	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+	cfg := &Config{}
+	if err := configManager.Load(cfg); err != nil {
+		// Config file not found, using defaults
 	}
 
-	// Initialize logger
-	appLogger := logger.New(&cfg.Logging)
+	// Set defaults if not specified
+	if cfg.Environment == "" {
+		cfg.Environment = "development"
+	}
+	if cfg.ServiceName == "" {
+		cfg.ServiceName = "api-gateway"
+	}
+	if cfg.Version == "" {
+		cfg.Version = "v1.0.0"
+	}
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 8080
+	}
+
+	// Initialize logger (use defaults if not configured)
+	if cfg.Logging == nil {
+		cfg.Logging = logger.DefaultConfig()
+	}
+	appLogger, err := logger.New(cfg.Logging)
+	if err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
 	appLogger.Info("Starting API Gateway...")
 
 	// Initialize JWT manager (for auth validation)
@@ -123,7 +168,7 @@ func main() {
 
 	// Graceful shutdown
 	go func() {
-		appLogger.WithField("port", cfg.Server.Port).Info("API Gateway started successfully")
+		appLogger.WithFields(logger.Fields{"port": cfg.Server.Port}).Info("API Gateway started successfully")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			appLogger.WithError(err).Fatal("Failed to start server")
 		}

@@ -1,24 +1,25 @@
-# API Server - Microservices Architecture
+# API Server - Production-Ready Microservices
 
-A production-ready microservices application built with **Go**, implementing **Clean Architecture** principles with complete service separation, JWT authentication, and enterprise-grade deployment capabilities.
+A **production-ready microservices application** built with **Go**, implementing **Clean Architecture** principles across multiple services. Features complete service separation, JWT authentication, enterprise-grade security, and cloud-native deployment capabilities.
 
-[![Go Version](https://img.shields.io/badge/go-1.21-blue.svg)](https://golang.org)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/go-1.21+-blue.svg)](https://golang.org)
+[![Architecture](https://img.shields.io/badge/architecture-microservices-green.svg)](docs/PROJECT_OVERVIEW.md)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://docker.com)
 [![Kubernetes](https://img.shields.io/badge/kubernetes-ready-326ce5.svg)](https://kubernetes.io)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## ✨ Microservices Features
+## ✨ Enterprise Features
 
-- **🏗️ True Microservices Architecture**: Complete service separation with API Gateway
-- **🔐 Dedicated Auth Service**: JWT token management and authentication
-- **👥 Dedicated User Service**: Pure user CRUD operations
-- **🌐 API Gateway**: Request routing, authentication, and rate limiting
-- **📦 Shared Libraries**: Zero code duplication across services
-- **🔄 Service Communication**: HTTP-based inter-service communication
-- **⚖️ Load Balancing**: Nginx reverse proxy with upstream routing
-- **📊 Monitoring**: Health checks and service discovery ready
-- **🚀 Container Ready**: Individual Docker containers per service
-- **☸️ Kubernetes Native**: Complete K8s manifests for all services
+- **🏗️ True Microservices Architecture**: 4 independent services with clear boundaries
+- **🔐 Dedicated Auth Service** (Port 8081): JWT management, login/logout, session handling
+- **👥 Dedicated User Service** (Port 8082): User CRUD operations, profile management  
+- **🌐 API Gateway** (Port 8080): Request routing, authentication, rate limiting
+- **⚖️ Load Balancer** (Nginx): SSL termination, traffic distribution, health routing
+- **📦 Zero Code Duplication**: Shared libraries for common functionality
+- **🔄 Service Communication**: HTTP-based with user context propagation
+- **📊 Enterprise Monitoring**: Health checks, structured logging, audit trails
+- **🚀 Container Native**: Individual optimized Docker containers per service
+- **☸️ Kubernetes Ready**: Complete production manifests with auto-scaling
 
 ## 🏗️ Architecture Overview
 
@@ -98,35 +99,34 @@ api-server/
 
 ### Prerequisites
 
-- **Go 1.21+**
-- **Docker & Docker Compose**
-- **PostgreSQL 15+** (or use Docker)
-- **Redis 7+** (or use Docker)
+- **Go 1.21+** - [Download Go](https://golang.org/dl/)
+- **Docker & Docker Compose** - [Install Docker](https://docs.docker.com/get-docker/)
+- **Git** - [Install Git](https://git-scm.com/downloads)
 
-### 🐳 Start All Services (Recommended)
+### 🐳 Complete Microservices Stack (Recommended)
 
 ```bash
 # 1. Clone the repository
 git clone <repository-url>
 cd api-server
 
-# 2. Start complete microservices stack
+# 2. Start complete microservices stack (all services + infrastructure)
 docker-compose -f docker-compose.microservices.yml up -d
 
-# 3. Check all services are healthy
+# 3. Verify all services are running
 docker-compose -f docker-compose.microservices.yml ps
 
-# 4. Test the system
+# 4. Test the complete system via load balancer
 curl http://localhost/health
 ```
 
-**Services will be available at:**
-- **Load Balancer (Nginx)**: http://localhost
-- **API Gateway**: http://localhost:8080  
-- **Auth Service**: http://localhost:8081
-- **User Service**: http://localhost:8082
-- **pgAdmin**: http://localhost:5050 (admin@dev.com / admin)
-- **Redis Insight**: http://localhost:8001
+**🎯 Access Points:**
+- **🌐 Main Application**: http://localhost (Nginx Load Balancer)
+- **🔧 API Gateway**: http://localhost:8080 (Direct access)
+- **🔐 Auth Service**: http://localhost:8081 (Direct access)
+- **👥 User Service**: http://localhost:8082 (Direct access)
+- **🗄️ Database Admin**: http://localhost:5050 (admin@dev.com / admin)
+- **⚡ Redis Admin**: http://localhost:8001
 
 ### 📡 API Endpoints
 
@@ -153,10 +153,10 @@ All requests go through the **API Gateway** via **Load Balancer**:
 | PUT | `/api/v1/users/{id}` | Update user | Yes (Admin) |
 | DELETE | `/api/v1/users/{id}` | Delete user | Yes (Admin) |
 
-### 🔑 Authentication Flow
+### 🔑 Complete Authentication Flow
 
 ```bash
-# 1. Register a new user (via API Gateway -> User Service)
+# 1. Register a new user (Load Balancer → API Gateway → User Service)
 curl -X POST http://localhost/api/v1/users/register \
   -H "Content-Type: application/json" \
   -d '{
@@ -166,17 +166,22 @@ curl -X POST http://localhost/api/v1/users/register \
     "last_name": "Doe"
   }'
 
-# 2. Login (via API Gateway -> Auth Service)
-curl -X POST http://localhost/api/v1/auth/login \
+# 2. Login to get JWT tokens (Load Balancer → API Gateway → Auth Service)
+TOKEN_RESPONSE=$(curl -s -X POST http://localhost/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "user@example.com",
+    "email": "user@example.com", 
     "password": "password123"
-  }'
+  }')
 
-# 3. Use the JWT token for protected endpoints
+# 3. Extract token and test protected endpoint
+TOKEN=$(echo $TOKEN_RESPONSE | jq -r '.data.access_token')
 curl -X GET http://localhost/api/v1/users/profile \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+  -H "Authorization: Bearer $TOKEN"
+
+# 4. Test admin endpoints (requires admin user)
+curl -X GET http://localhost/api/v1/users/users?page=1&limit=10 \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
 ## 🏢 Service Responsibilities
@@ -284,15 +289,25 @@ export API_GATEWAY_RATE_LIMIT=200
 - **CORS Protection**: Configurable cross-origin resource sharing
 - **Security Headers**: Comprehensive HTTP security headers
 
-## 📚 Documentation
+## 📚 Complete Documentation
 
-Complete documentation in the `docs/` folder:
+Comprehensive documentation covering all aspects of the microservices architecture:
 
-- **[Project Overview](docs/PROJECT_OVERVIEW.md)** - Architecture and technology stack
-- **[Setup Guide](docs/SETUP_GUIDE.md)** - Development and deployment setup  
-- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
-- **[Development Guide](docs/DEVELOPMENT_GUIDE.md)** - Development workflows
-- **[Database Guide](docs/DATABASE_GUIDE.md)** - Database operations and migrations
+- **[📋 Project Overview](docs/PROJECT_OVERVIEW.md)** - Architecture, technology stack, and design decisions
+- **[🚀 Setup Guide](docs/SETUP_GUIDE.md)** - Complete setup instructions for all environments  
+- **[🛠️ Development Guide](docs/DEVELOPMENT_GUIDE.md)** - Development workflows, coding standards, and testing
+- **[📡 API Reference](docs/API_REFERENCE.md)** - Complete API documentation with examples
+- **[🗄️ Database Guide](docs/DATABASE_GUIDE.md)** - Database schema, operations, and maintenance
+
+### 🎯 Quick Navigation
+
+| Need to... | Go to |
+|------------|-------|
+| **Understand the architecture** | [Project Overview](docs/PROJECT_OVERVIEW.md) |
+| **Set up locally** | [Setup Guide](docs/SETUP_GUIDE.md) |
+| **Start developing** | [Development Guide](docs/DEVELOPMENT_GUIDE.md) |
+| **Integrate with APIs** | [API Reference](docs/API_REFERENCE.md) |
+| **Work with database** | [Database Guide](docs/DATABASE_GUIDE.md) |
 
 ## 🤝 Contributing
 
@@ -309,6 +324,14 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**Enterprise-ready microservices architecture built with Go** 🚀
+## 🎯 Project Status
 
-*Complete service separation • JWT authentication • Production deployment ready*
+✅ **Production Ready** - Complete microservices architecture with enterprise features  
+✅ **Well Documented** - Comprehensive documentation for all components  
+✅ **Container Native** - Docker and Kubernetes deployment ready  
+✅ **Security Focused** - JWT authentication, RBAC, audit logging  
+✅ **Developer Friendly** - Hot reload, testing utilities, clear architecture  
+
+**Built with ❤️ using Go microservices architecture** 🚀
+
+*True service separation • Zero code duplication • Enterprise-grade security • Cloud-native deployment*

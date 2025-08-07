@@ -16,7 +16,7 @@ server:
 
 # Database configuration
 database:
-  host: "postgres"
+  host: "localhost"
   port: 5432
   username: "postgres"
   password: "postgres"

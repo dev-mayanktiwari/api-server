@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/auth"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/config"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/database"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
@@ -26,8 +27,9 @@ import (
 // ServiceConfig represents the user service configuration
 type ServiceConfig struct {
 	config.BaseConfig `mapstructure:",squash"`
-	Server            config.ServerConfig   `mapstructure:"server"`
-	Database          config.DatabaseConfig `mapstructure:"database"`
+	Server            config.ServerConfig    `mapstructure:"server"`
+	Database          config.DatabaseConfig  `mapstructure:"database"`
+	JWT               config.JWTConfig       `mapstructure:"jwt"`
 	RateLimit         config.RateLimitConfig `mapstructure:"rate_limit"`
 	CORS              config.CORSConfig      `mapstructure:"cors"`
 	Logging           *logger.Config         `mapstructure:"logging"`
@@ -49,7 +51,18 @@ func DefaultConfig() *ServiceConfig {
 			IdleTimeout:     60 * time.Second,
 			ShutdownTimeout: 10 * time.Second,
 		},
-		Database: *database.DefaultConfig(),
+		Database: config.DatabaseConfig{
+			Host:            "localhost",
+			Port:            5432,
+			Username:        "postgres",
+			Password:        "password",
+			Database:        "userdb",
+			SSLMode:         "disable",
+			MaxOpenConns:    25,
+			MaxIdleConns:    5,
+			ConnMaxLifetime: 5 * time.Minute,
+			ConnMaxIdleTime: 5 * time.Minute,
+		},
 		JWT: config.JWTConfig{
 			Secret:         "your-secret-key",
 			Issuer:         "user-service",
@@ -88,61 +101,63 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Initialize logger
-	logger, err := logger.New(cfg.Logging)
-	if err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+	// Initialize appLogger (use defaults if not configured)
+	if cfg.Logging == nil {
+		cfg.Logging = logger.DefaultConfig()
 	}
-	defer logger.Close()
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 8082
+	}
+	appLogger, err := logger.New(cfg.Logging)
+	if err != nil {
+		log.Fatalf("Failed to initialize appLogger: %v", err)
+	}
 
-	// Set global logger
-	logger.SetDefault(logger)
-
-	logger.WithFields(logger.Fields{
+	appLogger.WithFields(logger.Fields{
 		"service": cfg.ServiceName,
 		"version": cfg.Version,
 		"env":     cfg.Environment,
 	}).Info("Starting user service")
 
 	// Initialize database
-	db, err := database.Connect(&cfg.Database, logger)
+	db, err := database.Connect(&cfg.Database, appLogger)
 	if err != nil {
-		logger.WithError(err).Fatal("Failed to connect to database")
+		appLogger.WithError(err).Fatal("Failed to connect to database")
 	}
 	defer db.Close()
 
 	// Auto-migrate database schema
 	if err := db.Migrate(&dbImpl.UserModel{}); err != nil {
-		logger.WithError(err).Fatal("Failed to migrate database")
+		appLogger.WithError(err).Fatal("Failed to migrate database")
 	}
 
 	// Initialize JWT manager
-	jwtManager := auth.NewJWTManager(&cfg.JWT, logger)
+	jwtManager := auth.NewJWTManager(&cfg.JWT, appLogger)
 
 	// Initialize repositories
-	userRepo := dbImpl.NewUserRepository(db, logger)
+	userRepo := dbImpl.NewUserRepository(db, appLogger)
 
 	// Initialize domain services
-	userDomainService := domainServices.NewUserDomainService(userRepo, logger)
+	userDomainService := domainServices.NewUserDomainService(userRepo, appLogger)
 
 	// Initialize application services
-	userAppService := services.NewUserApplicationService(userRepo, userDomainService, jwtManager, logger)
+	userAppService := services.NewUserApplicationService(userRepo, userDomainService, appLogger)
 
 	// Initialize handlers
-	userHandler := handlers.NewUserHandler(userAppService, logger)
+	userHandler := handlers.NewUserHandler(userAppService, appLogger)
 
 	// Initialize HTTP server
-	server := initializeServer(cfg, logger, userHandler, jwtManager, db)
+	server := initializeServer(cfg, appLogger, userHandler, jwtManager, db)
 
 	// Start server
 	go func() {
 		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-		logger.WithFields(logger.Fields{
+		appLogger.WithFields(logger.Fields{
 			"address": addr,
 		}).Info("Starting HTTP server")
 
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.WithError(err).Fatal("Failed to start server")
+			appLogger.WithError(err).Fatal("Failed to start server")
 		}
 	}()
 
@@ -151,7 +166,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	logger.Info("Shutting down server...")
+	appLogger.Info("Shutting down server...")
 
 	// Create shutdown context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
@@ -159,10 +174,10 @@ func main() {
 
 	// Shutdown server gracefully
 	if err := server.Shutdown(ctx); err != nil {
-		logger.WithError(err).Error("Server forced to shutdown")
+		appLogger.WithError(err).Error("Server forced to shutdown")
 	}
 
-	logger.Info("User service stopped")
+	appLogger.Info("User service stopped")
 }
 
 // initializeServer initializes the HTTP server with middleware and routes
@@ -177,7 +192,7 @@ func initializeServer(cfg *ServiceConfig, log *logger.Logger, userHandler *handl
 
 	// Add middleware
 	router.Use(middleware.RequestID())
-	router.Use(middleware.Logging(log))
+	router.Use(middleware.Logger(log))
 	router.Use(middleware.Recovery(log))
 	router.Use(middleware.CORS(&cfg.CORS))
 	router.Use(middleware.RateLimit(&cfg.RateLimit))

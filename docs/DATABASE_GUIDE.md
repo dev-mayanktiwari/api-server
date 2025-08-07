@@ -1,27 +1,38 @@
 # Database Guide
 
-Complete guide to database management, migrations, and data operations for the API Server project.
+Complete guide to database management, schema design, migrations, and operations for the API Server microservices project.
 
 ## 🗄️ Database Overview
 
 ### Technology Stack
 - **Database**: PostgreSQL 15+
 - **ORM**: GORM (Go Object-Relational Mapping)
-- **Connection Pooling**: pgxpool
-- **Migrations**: SQL scripts with versioning
+- **Connection Pooling**: pgxpool for efficient connection management
+- **Extensions**: UUID generation, pgcrypto for security
+- **Migration Strategy**: SQL scripts with versioning
 
-### Database Schema
+### Database Architecture
+The database is shared across microservices but each service has clear data ownership:
+- **User Service**: Owns user data, profiles, and user-related operations
+- **Auth Service**: Owns session data, tokens, and authentication-related data
+- **Shared Tables**: Audit logs, rate limiting data
+
+## 📊 Database Schema
+
+### Core Tables
+
+#### Users Table
+Primary table for user management across all services.
 
 ```sql
--- Users table (primary entity)
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NOT NULL,              -- bcrypt hashed
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
-    role VARCHAR(50) NOT NULL DEFAULT 'user',
-    status VARCHAR(50) NOT NULL DEFAULT 'active',
+    role VARCHAR(50) NOT NULL DEFAULT 'user',    -- 'user' | 'admin'
+    status VARCHAR(50) NOT NULL DEFAULT 'active', -- 'active' | 'inactive' | 'suspended'
     email_verified BOOLEAN DEFAULT FALSE,
     email_verified_at TIMESTAMP WITH TIME ZONE,
     password_changed_at TIMESTAMP WITH TIME ZONE,
@@ -30,21 +41,94 @@ CREATE TABLE users (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+```
 
--- User sessions (for JWT tracking)
+**Indexes**:
+- `idx_users_email` - Unique email lookups
+- `idx_users_status` - Status filtering for admin queries
+- `idx_users_role` - Role-based access control
+- `idx_users_created_at` - Date-based sorting and filtering
+
+#### User Sessions Table
+Manages JWT tokens and user sessions for the Auth Service.
+
+```sql
 CREATE TABLE user_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash VARCHAR(255) NOT NULL,
-    device_info JSONB,
-    ip_address INET,
-    user_agent TEXT,
+    token_hash VARCHAR(255) NOT NULL,            -- Hashed JWT token
+    device_info JSONB,                           -- Device information
+    ip_address INET,                             -- Client IP address
+    user_agent TEXT,                             -- Client user agent
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+```
 
--- Additional tables for features...
+**Indexes**:
+- `idx_user_sessions_user_id` - User session lookups
+- `idx_user_sessions_token_hash` - Token validation
+- `idx_user_sessions_expires_at` - Cleanup expired sessions
+
+#### Password Reset Tokens
+Secure password recovery functionality.
+
+```sql
+CREATE TABLE password_reset_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token VARCHAR(255) NOT NULL,                 -- Secure random token
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    used BOOLEAN DEFAULT FALSE,                  -- One-time use
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### Email Verification Tokens
+Email verification workflow support.
+
+```sql
+CREATE TABLE email_verification_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token VARCHAR(255) NOT NULL,                 -- Secure random token
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    used BOOLEAN DEFAULT FALSE,                  -- One-time use
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### Audit Logs
+Complete audit trail for security and compliance.
+
+```sql
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    action VARCHAR(100) NOT NULL,               -- 'create', 'update', 'delete', 'login', etc.
+    resource VARCHAR(100),                      -- 'user', 'session', etc.
+    resource_id UUID,                          -- ID of affected resource
+    old_values JSONB,                          -- Previous state (for updates)
+    new_values JSONB,                          -- New state
+    ip_address INET,                           -- Client IP
+    user_agent TEXT,                           -- Client user agent
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### Rate Limits
+Database-backed rate limiting for API endpoints.
+
+```sql
+CREATE TABLE rate_limits (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    key VARCHAR(255) NOT NULL,                  -- Rate limit key (IP, user_id, etc.)
+    count INTEGER NOT NULL DEFAULT 1,           -- Current request count
+    reset_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
 ## 🚀 Database Setup
@@ -53,40 +137,70 @@ CREATE TABLE user_sessions (
 
 #### 1. Using Docker (Recommended)
 ```bash
-# Start PostgreSQL container
-docker-compose up -d postgres
+# Start PostgreSQL container with initialization
+docker-compose -f docker-compose.microservices.yml up -d postgres
 
 # Check if database is ready
-docker-compose exec postgres pg_isready -U postgres
+docker-compose -f docker-compose.microservices.yml exec postgres pg_isready -U postgres
 
 # Connect to database
-docker-compose exec postgres psql -U postgres -d api_server
+docker-compose -f docker-compose.microservices.yml exec postgres \
+  psql -U postgres -d api_server
 ```
 
-#### 2. Manual Installation
-```bash
-# Install PostgreSQL (Ubuntu/Debian)
-sudo apt-get update
-sudo apt-get install postgresql postgresql-contrib
+#### 2. Manual PostgreSQL Installation
 
-# Install PostgreSQL (macOS)
-brew install postgresql
-brew services start postgresql
+##### Ubuntu/Debian
+```bash
+# Update package list
+sudo apt-get update
+
+# Install PostgreSQL and extensions
+sudo apt-get install postgresql postgresql-contrib postgresql-15
+
+# Start PostgreSQL service
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
 
 # Create database and user
 sudo -u postgres createdb api_server
-sudo -u postgres createuser --superuser api_user
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
 ```
+
+##### macOS
+```bash
+# Install via Homebrew
+brew install postgresql@15
+
+# Start PostgreSQL service
+brew services start postgresql@15
+
+# Create database
+createdb api_server
+
+# Connect as superuser
+psql postgres
+```
+
+##### Windows
+1. Download PostgreSQL installer from https://www.postgresql.org/download/windows/
+2. Run installer and follow setup wizard
+3. Remember the superuser password
+4. Use pgAdmin or psql to create database
 
 ### Database Initialization
 
-#### 1. Run Initialization Script
+#### 1. Initialize Database Schema
 ```bash
 # Via Docker
-docker-compose exec postgres psql -U postgres -d api_server -f /docker-entrypoint-initdb.d/init-db.sql
+docker-compose -f docker-compose.microservices.yml exec postgres \
+  psql -U postgres -d api_server -f /docker-entrypoint-initdb.d/init-db.sql
 
 # Via local psql
 psql -U postgres -d api_server -f scripts/init-db.sql
+
+# Via psql with specific host
+psql -h localhost -U postgres -d api_server -f scripts/init-db.sql
 ```
 
 #### 2. Verify Database Setup
@@ -94,24 +208,63 @@ psql -U postgres -d api_server -f scripts/init-db.sql
 -- Connect to database
 \c api_server;
 
--- List tables
+-- List all tables
 \dt
 
--- Check users table structure
-\d users;
+-- Check table structure
+\d users
+\d user_sessions
 
--- Verify extensions
-\dx;
+-- Verify indexes
+\di
+
+-- Check extensions
+\dx
+
+-- Test default admin user
+SELECT id, email, role, status FROM users WHERE role = 'admin';
 ```
 
-## 📊 Database Configuration
+#### 3. Database Permissions
+```sql
+-- Grant permissions to application user (if created)
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO api_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO api_user;
+
+-- Grant permissions for functions
+GRANT EXECUTE ON FUNCTION cleanup_expired_tokens() TO api_user;
+GRANT EXECUTE ON FUNCTION update_updated_at_column() TO api_user;
+```
+
+## 🔧 Database Configuration
 
 ### Connection Configuration
 
+#### Environment Variables
+```bash
+# Primary database connection
+export DB_HOST=localhost
+export DB_PORT=5432
+export DB_USERNAME=postgres
+export DB_PASSWORD=postgres
+export DB_DATABASE=api_server
+export DB_SSL_MODE=disable
+
+# Connection pooling
+export DB_MAX_OPEN_CONNS=25
+export DB_MAX_IDLE_CONNS=5
+export DB_CONN_MAX_LIFETIME=30m
+
+# For testing
+export DB_TEST_DATABASE=api_server_test
+```
+
+#### Service-Specific Configuration
+
+##### User Service (configs/development/config.yaml)
 ```yaml
-# configs/development/config.yaml
 database:
-  host: "localhost"
+  host: "postgres"
   port: 5432
   username: "postgres"
   password: "postgres"
@@ -119,649 +272,548 @@ database:
   sslmode: "disable"
   max_open_conns: 25
   max_idle_conns: 5
-  conn_max_lifetime: 30m
-  conn_max_idle_time: 5m
+  conn_max_lifetime: "30m"
+  auto_migrate: true
   log_level: "info"
 ```
 
-### Environment Variables
-```bash
-# Database connection
-export USER_SERVICE_DATABASE_HOST=localhost
-export USER_SERVICE_DATABASE_PORT=5432
-export USER_SERVICE_DATABASE_USERNAME=postgres
-export USER_SERVICE_DATABASE_PASSWORD=postgres
-export USER_SERVICE_DATABASE_DATABASE=api_server
-export USER_SERVICE_DATABASE_SSLMODE=disable
-
-# Connection pool settings
-export USER_SERVICE_DATABASE_MAXOPENCONNS=25
-export USER_SERVICE_DATABASE_MAXIDLECONNS=5
-export USER_SERVICE_DATABASE_CONNMAXLIFETIME=30m
+##### Auth Service (configs/auth-service/config.yaml)
+```yaml
+database:
+  host: "postgres"
+  port: 5432
+  username: "postgres"
+  password: "postgres"
+  database: "api_server"
+  sslmode: "disable"
+  max_open_conns: 15
+  max_idle_conns: 3
+  conn_max_lifetime: "30m"
+  auto_migrate: true
+  log_level: "warn"
 ```
 
-### Connection Pool Tuning
+### Connection Pooling Best Practices
 
+#### Pool Size Guidelines
+- **Development**: 5-10 connections per service
+- **Staging**: 15-25 connections per service  
+- **Production**: 25-50 connections per service (based on load)
+
+#### Connection Management
 ```go
-// Database connection configuration
-config := &database.Config{
-    Host:               "localhost",
-    Port:               5432,
-    Username:           "postgres",
-    Password:           "postgres",
-    Database:           "api_server",
-    SSLMode:            "disable",
-    MaxOpenConns:       25,    // Maximum open connections
-    MaxIdleConns:       5,     // Maximum idle connections
-    ConnMaxLifetime:    30 * time.Minute, // Connection lifetime
-    ConnMaxIdleTime:    5 * time.Minute,  // Idle connection timeout
-}
-```
+// Example GORM configuration
+db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+    Logger: logger.Default.LogMode(logger.Info),
+})
 
-## 🏗️ Database Models
+sqlDB, err := db.DB()
 
-### Domain Entity
-```go
-// internal/domain/entities/user.go
-type User struct {
-    ID                string
-    Email             string
-    Password          string
-    FirstName         string
-    LastName          string
-    Role              UserRole
-    Status            UserStatus
-    EmailVerified     bool
-    EmailVerifiedAt   *time.Time
-    PasswordChangedAt *time.Time
-    LastLoginAt       *time.Time
-    LoginCount        int
-    CreatedAt         time.Time
-    UpdatedAt         time.Time
-}
-
-type UserRole string
-const (
-    RoleUser  UserRole = "user"
-    RoleAdmin UserRole = "admin"
-)
-
-type UserStatus string
-const (
-    StatusActive   UserStatus = "active"
-    StatusInactive UserStatus = "inactive"
-)
-```
-
-### GORM Model
-```go
-// internal/infrastructure/database/models.go
-type UserModel struct {
-    ID                string         `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"`
-    Email             string         `gorm:"type:varchar(255);uniqueIndex;not null"`
-    Password          string         `gorm:"type:varchar(255);not null"`
-    FirstName         string         `gorm:"type:varchar(100);not null"`
-    LastName          string         `gorm:"type:varchar(100);not null"`
-    Role              string         `gorm:"type:varchar(50);not null;default:'user'"`
-    Status            string         `gorm:"type:varchar(50);not null;default:'active'"`
-    EmailVerified     bool           `gorm:"default:false"`
-    EmailVerifiedAt   *time.Time     `gorm:"type:timestamp"`
-    PasswordChangedAt *time.Time     `gorm:"type:timestamp"`
-    LastLoginAt       *time.Time     `gorm:"type:timestamp"`
-    LoginCount        int            `gorm:"default:0"`
-    CreatedAt         time.Time      `gorm:"autoCreateTime"`
-    UpdatedAt         time.Time      `gorm:"autoUpdateTime"`
-}
-
-func (UserModel) TableName() string {
-    return "users"
-}
-```
-
-### Model Conversion
-```go
-// Convert GORM model to domain entity
-func (m *UserModel) ToEntity() *entities.User {
-    return &entities.User{
-        ID:                m.ID,
-        Email:             m.Email,
-        FirstName:         m.FirstName,
-        LastName:          m.LastName,
-        Role:              entities.UserRole(m.Role),
-        Status:            entities.UserStatus(m.Status),
-        EmailVerified:     m.EmailVerified,
-        EmailVerifiedAt:   m.EmailVerifiedAt,
-        PasswordChangedAt: m.PasswordChangedAt,
-        LastLoginAt:       m.LastLoginAt,
-        LoginCount:        m.LoginCount,
-        CreatedAt:         m.CreatedAt,
-        UpdatedAt:         m.UpdatedAt,
-    }
-}
-
-// Convert domain entity to GORM model
-func NewUserModelFromEntity(user *entities.User) *UserModel {
-    return &UserModel{
-        ID:                user.ID,
-        Email:             user.Email,
-        Password:          user.Password,
-        FirstName:         user.FirstName,
-        LastName:          user.LastName,
-        Role:              string(user.Role),
-        Status:            string(user.Status),
-        EmailVerified:     user.EmailVerified,
-        EmailVerifiedAt:   user.EmailVerifiedAt,
-        PasswordChangedAt: user.PasswordChangedAt,
-        LastLoginAt:       user.LastLoginAt,
-        LoginCount:        user.LoginCount,
-        CreatedAt:         user.CreatedAt,
-        UpdatedAt:         user.UpdatedAt,
-    }
-}
+// Configure connection pool
+sqlDB.SetMaxOpenConns(25)        // Maximum connections
+sqlDB.SetMaxIdleConns(5)         // Idle connections
+sqlDB.SetConnMaxLifetime(time.Hour) // Connection lifetime
 ```
 
 ## 🔄 Database Operations
 
-### Repository Pattern Implementation
+### GORM Auto-Migration
 
+#### User Service Models
 ```go
-// internal/infrastructure/database/user_repository_impl.go
-type userRepository struct {
-    db     database.DB
-    logger logger.Logger
-}
-
-func NewUserRepository(db database.DB, logger logger.Logger) repositories.UserRepository {
-    return &userRepository{
-        db:     db,
-        logger: logger,
-    }
-}
-
-// Create user
-func (r *userRepository) Create(ctx context.Context, user *entities.User) error {
-    model := NewUserModelFromEntity(user)
-    
-    if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
-        r.logger.WithContext(ctx).WithError(err).Error("Failed to create user")
-        return err
-    }
-    
-    // Update entity with generated ID
-    user.ID = model.ID
-    user.CreatedAt = model.CreatedAt
-    user.UpdatedAt = model.UpdatedAt
-    
-    return nil
-}
-
-// Get user by ID
-func (r *userRepository) GetByID(ctx context.Context, id string) (*entities.User, error) {
-    var model UserModel
-    
-    if err := r.db.WithContext(ctx).Where("id = ?", id).First(&model).Error; err != nil {
-        if errors.Is(err, gorm.ErrRecordNotFound) {
-            return nil, domain.ErrUserNotFound
-        }
-        r.logger.WithContext(ctx).WithError(err).Error("Failed to get user by ID")
-        return nil, err
-    }
-    
-    return model.ToEntity(), nil
-}
-
-// Update user
-func (r *userRepository) Update(ctx context.Context, user *entities.User) error {
-    model := NewUserModelFromEntity(user)
-    
-    if err := r.db.WithContext(ctx).Save(model).Error; err != nil {
-        r.logger.WithContext(ctx).WithError(err).Error("Failed to update user")
-        return err
-    }
-    
-    user.UpdatedAt = model.UpdatedAt
-    return nil
-}
-
-// List with pagination
-func (r *userRepository) List(ctx context.Context, offset, limit int) ([]*entities.User, int64, error) {
-    var models []UserModel
-    var total int64
-    
-    // Get total count
-    if err := r.db.WithContext(ctx).Model(&UserModel{}).Count(&total).Error; err != nil {
-        return nil, 0, err
-    }
-    
-    // Get paginated results
-    if err := r.db.WithContext(ctx).
-        Offset(offset).
-        Limit(limit).
-        Order("created_at DESC").
-        Find(&models).Error; err != nil {
-        return nil, 0, err
-    }
-    
-    // Convert to entities
-    users := make([]*entities.User, len(models))
-    for i, model := range models {
-        users[i] = model.ToEntity()
-    }
-    
-    return users, total, nil
+// Auto-migrate user-related tables
+func AutoMigrate(db *gorm.DB) error {
+    return db.AutoMigrate(
+        &entities.User{},
+        &entities.PasswordResetToken{},
+        &entities.EmailVerificationToken{},
+        &entities.AuditLog{},
+    )
 }
 ```
 
-### Transaction Support
-
+#### Auth Service Models
 ```go
-// Application service with transaction
-func (s *UserApplicationService) CreateUserWithProfile(ctx context.Context, req *dto.CreateUserWithProfileRequest) error {
-    return s.db.Transaction(func(tx *gorm.DB) error {
-        // Create user
-        user := entities.NewUser(req.Email, req.Password, req.FirstName, req.LastName)
-        if err := tx.WithContext(ctx).Create(NewUserModelFromEntity(user)).Error; err != nil {
-            return err
-        }
-        
-        // Create profile
-        profile := entities.NewUserProfile(user.ID, req.ProfileData)
-        if err := tx.WithContext(ctx).Create(NewProfileModelFromEntity(profile)).Error; err != nil {
-            return err
-        }
-        
-        return nil
-    })
+// Auto-migrate auth-related tables
+func AutoMigrate(db *gorm.DB) error {
+    return db.AutoMigrate(
+        &entities.UserSession{},
+        &entities.RateLimit{},
+    )
 }
 ```
 
-## 📈 Database Migrations
+### Manual Migrations
 
-### Migration Strategy
+#### Creating Migration Scripts
+```bash
+# Create migration directory structure
+mkdir -p migrations/{up,down}
 
-We use SQL migration files with version numbers for database schema changes.
-
-### Migration File Structure
-```
-scripts/migrations/
-├── 001_initial_schema.sql          # Initial database schema
-├── 002_add_user_sessions.sql       # Add user sessions table
-├── 003_add_user_indexes.sql        # Add performance indexes
-└── 004_add_audit_logs.sql          # Add audit logging
-```
-
-### Migration File Format
-
-```sql
--- Migration: 001_initial_schema.sql
--- Description: Initial database schema with users table
--- Author: Developer Name
--- Date: 2024-01-01
-
-BEGIN;
-
--- Create UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
--- Create users table
-CREATE TABLE IF NOT EXISTS users (
+# Create migration files
+cat > migrations/up/001_add_user_preferences.sql << 'EOF'
+CREATE TABLE user_preferences (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password VARCHAR(255) NOT NULL,
-    first_name VARCHAR(100) NOT NULL,
-    last_name VARCHAR(100) NOT NULL,
-    role VARCHAR(50) NOT NULL DEFAULT 'user',
-    status VARCHAR(50) NOT NULL DEFAULT 'active',
-    email_verified BOOLEAN DEFAULT FALSE,
-    email_verified_at TIMESTAMP WITH TIME ZONE,
-    password_changed_at TIMESTAMP WITH TIME ZONE,
-    last_login_at TIMESTAMP WITH TIME ZONE,
-    login_count INTEGER DEFAULT 0,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    theme VARCHAR(50) DEFAULT 'light',
+    language VARCHAR(10) DEFAULT 'en',
+    timezone VARCHAR(50) DEFAULT 'UTC',
+    notifications JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create indexes
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
-CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
-CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
+CREATE INDEX idx_user_preferences_user_id ON user_preferences(user_id);
+EOF
 
--- Create updated_at trigger function
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
--- Create trigger
-CREATE TRIGGER update_users_updated_at
-    BEFORE UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-COMMIT;
+cat > migrations/down/001_add_user_preferences.sql << 'EOF'
+DROP INDEX IF EXISTS idx_user_preferences_user_id;
+DROP TABLE IF EXISTS user_preferences;
+EOF
 ```
 
-### Running Migrations
-
-#### Manual Migration
+#### Running Migrations
 ```bash
-# Run specific migration
-psql -U postgres -d api_server -f scripts/migrations/001_initial_schema.sql
+# Apply migration
+psql -U postgres -d api_server -f migrations/up/001_add_user_preferences.sql
 
-# Run all migrations (in order)
-for migration in scripts/migrations/*.sql; do
-    echo "Running $migration"
-    psql -U postgres -d api_server -f "$migration"
-done
+# Rollback migration
+psql -U postgres -d api_server -f migrations/down/001_add_user_preferences.sql
 ```
 
-#### Docker Migration
+### Database Maintenance
+
+#### Cleanup Expired Data
+```sql
+-- Manual cleanup (or call function)
+SELECT cleanup_expired_tokens();
+
+-- Check what will be cleaned up
+SELECT 'password_reset_tokens' as table_name, count(*) as expired_count
+FROM password_reset_tokens 
+WHERE expires_at < CURRENT_TIMESTAMP
+
+UNION ALL
+
+SELECT 'email_verification_tokens', count(*)
+FROM email_verification_tokens 
+WHERE expires_at < CURRENT_TIMESTAMP
+
+UNION ALL
+
+SELECT 'user_sessions', count(*)
+FROM user_sessions 
+WHERE expires_at < CURRENT_TIMESTAMP
+
+UNION ALL
+
+SELECT 'audit_logs (>90 days)', count(*)
+FROM audit_logs 
+WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days';
+```
+
+#### Database Statistics
+```sql
+-- Table sizes
+SELECT 
+    schemaname,
+    tablename,
+    attname,
+    n_distinct,
+    correlation
+FROM pg_stats 
+WHERE schemaname = 'public'
+ORDER BY tablename, attname;
+
+-- Index usage
+SELECT 
+    schemaname,
+    tablename,
+    indexname,
+    idx_scan as index_scans,
+    idx_tup_read as tuples_read,
+    idx_tup_fetch as tuples_fetched
+FROM pg_stat_user_indexes 
+ORDER BY idx_scan DESC;
+
+-- Connection stats
+SELECT 
+    datname,
+    numbackends as connections,
+    xact_commit as committed_transactions,
+    xact_rollback as rolled_back_transactions,
+    blks_read as blocks_read,
+    blks_hit as blocks_hit,
+    tup_returned as tuples_returned,
+    tup_fetched as tuples_fetched,
+    tup_inserted as tuples_inserted,
+    tup_updated as tuples_updated,
+    tup_deleted as tuples_deleted
+FROM pg_stat_database 
+WHERE datname = 'api_server';
+```
+
+### Performance Optimization
+
+#### Index Optimization
+```sql
+-- Find missing indexes
+SELECT 
+    schemaname,
+    tablename,
+    attname,
+    n_distinct,
+    correlation
+FROM pg_stats 
+WHERE schemaname = 'public'
+  AND n_distinct > 100
+ORDER BY n_distinct DESC;
+
+-- Find unused indexes
+SELECT 
+    schemaname,
+    tablename,
+    indexname,
+    idx_scan
+FROM pg_stat_user_indexes 
+WHERE idx_scan = 0
+ORDER BY tablename;
+
+-- Analyze query performance
+EXPLAIN ANALYZE SELECT * FROM users WHERE email = 'test@example.com';
+EXPLAIN ANALYZE SELECT * FROM users WHERE status = 'active' ORDER BY created_at DESC LIMIT 10;
+```
+
+#### Query Optimization Examples
+```sql
+-- Efficient user search with pagination
+SELECT id, email, first_name, last_name, status, created_at
+FROM users 
+WHERE status = 'active'
+  AND (first_name ILIKE '%search%' OR last_name ILIKE '%search%' OR email ILIKE '%search%')
+ORDER BY created_at DESC
+LIMIT 20 OFFSET 0;
+
+-- Efficient session cleanup
+DELETE FROM user_sessions 
+WHERE expires_at < CURRENT_TIMESTAMP - INTERVAL '1 hour';
+
+-- Count active users efficiently
+SELECT 
+    COUNT(*) FILTER (WHERE status = 'active') as active_users,
+    COUNT(*) FILTER (WHERE status = 'inactive') as inactive_users,
+    COUNT(*) FILTER (WHERE role = 'admin') as admin_users
+FROM users;
+```
+
+## 🧪 Testing Database
+
+### Test Database Setup
 ```bash
-# Copy migration to container and run
-docker-compose exec postgres psql -U postgres -d api_server -f /migrations/001_initial_schema.sql
+# Create test database
+docker-compose -f docker-compose.microservices.yml exec postgres \
+  createdb -U postgres api_server_test
 
-# Or mount migrations directory
-docker run --rm -v $(pwd)/scripts/migrations:/migrations postgres:15-alpine \
-    psql -h host -U postgres -d api_server -f /migrations/001_initial_schema.sql
+# Initialize test database
+docker-compose -f docker-compose.microservices.yml exec postgres \
+  psql -U postgres -d api_server_test -f /docker-entrypoint-initdb.d/init-db.sql
+
+# Alternative: Local test database
+createdb api_server_test
+psql -U postgres -d api_server_test -f scripts/init-db.sql
 ```
 
-### Migration Best Practices
+### Test Data Management
 
-1. **Always use transactions** for migration scripts
-2. **Use IF NOT EXISTS** for CREATE statements
-3. **Version migrations** with incremental numbers
-4. **Test migrations** on copy of production data
-5. **Include rollback scripts** for complex changes
-6. **Document breaking changes** clearly
-
-### Rollback Migrations
-
-```sql
--- Rollback: 002_add_user_sessions.sql
--- Description: Rollback user sessions table creation
--- Date: 2024-01-02
-
-BEGIN;
-
--- Drop user sessions table
-DROP TABLE IF EXISTS user_sessions CASCADE;
-
--- Drop related indexes
-DROP INDEX IF EXISTS idx_user_sessions_user_id;
-DROP INDEX IF EXISTS idx_user_sessions_token_hash;
-DROP INDEX IF EXISTS idx_user_sessions_expires_at;
-
-COMMIT;
-```
-
-## 📊 Database Monitoring
-
-### Health Checks
-
+#### Test Fixtures
 ```go
-// Database health check implementation
-func (db *Database) HealthCheck(ctx context.Context) error {
-    // Test basic connectivity
-    sqlDB, err := db.DB()
-    if err != nil {
-        return fmt.Errorf("failed to get database instance: %w", err)
+// tests/utils/fixtures.go
+package utils
+
+import (
+    "context"
+    "gorm.io/gorm"
+)
+
+func CreateTestUser(db *gorm.DB) *domain.User {
+    user := &domain.User{
+        Email:     "test@example.com",
+        Password:  "$2a$10$hashedpassword",
+        FirstName: "Test",
+        LastName:  "User",
+        Role:      "user",
+        Status:    "active",
     }
-    
-    // Ping database
-    if err := sqlDB.PingContext(ctx); err != nil {
-        return fmt.Errorf("database ping failed: %w", err)
+    db.Create(user)
+    return user
+}
+
+func CreateTestAdmin(db *gorm.DB) *domain.User {
+    admin := &domain.User{
+        Email:     "admin@example.com", 
+        Password:  "$2a$10$hashedpassword",
+        FirstName: "Admin",
+        LastName:  "User",
+        Role:      "admin",
+        Status:    "active",
     }
-    
-    // Test query execution
-    var result int
-    if err := db.WithContext(ctx).Raw("SELECT 1").Scan(&result).Error; err != nil {
-        return fmt.Errorf("test query failed: %w", err)
-    }
-    
-    return nil
+    db.Create(admin)
+    return admin
+}
+
+func CleanupTestData(db *gorm.DB) {
+    db.Exec("TRUNCATE users, user_sessions, audit_logs, rate_limits RESTART IDENTITY CASCADE")
 }
 ```
 
-### Connection Pool Monitoring
-
+#### Database Test Utilities
 ```go
-// Get database statistics
-func (db *Database) GetStats() map[string]interface{} {
-    sqlDB, _ := db.DB()
-    stats := sqlDB.Stats()
+// tests/utils/database.go
+package utils
+
+import (
+    "fmt"
+    "gorm.io/driver/postgres"
+    "gorm.io/gorm"
+    "gorm.io/gorm/logger"
+    "testing"
+)
+
+func SetupTestDB(t *testing.T) *gorm.DB {
+    dsn := fmt.Sprintf(
+        "host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+        "localhost", "5432", "postgres", "postgres", "api_server_test",
+    )
     
-    return map[string]interface{}{
-        "open_connections":     stats.OpenConnections,
-        "in_use_connections":   stats.InUse,
-        "idle_connections":     stats.Idle,
-        "wait_count":          stats.WaitCount,
-        "wait_duration":       stats.WaitDuration.String(),
-        "max_idle_closed":     stats.MaxIdleClosed,
-        "max_lifetime_closed": stats.MaxLifetimeClosed,
-    }
-}
-```
-
-### Query Performance
-
-```sql
--- Find slow queries
-SELECT
-    query,
-    mean_exec_time,
-    calls,
-    total_exec_time,
-    rows,
-    100.0 * shared_blks_hit / nullif(shared_blks_hit + shared_blks_read, 0) AS hit_percent
-FROM pg_stat_statements
-WHERE mean_exec_time > 1000  -- Queries taking more than 1 second
-ORDER BY mean_exec_time DESC
-LIMIT 10;
-
--- Check connection activity
-SELECT
-    pid,
-    usename,
-    application_name,
-    client_addr,
-    state,
-    query_start,
-    query
-FROM pg_stat_activity
-WHERE state != 'idle'
-ORDER BY query_start;
-```
-
-## 🎯 Database Best Practices
-
-### Query Optimization
-
-```go
-// Good: Use specific columns
-func (r *userRepository) GetUserEmail(ctx context.Context, id string) (string, error) {
-    var email string
-    err := r.db.WithContext(ctx).
-        Model(&UserModel{}).
-        Where("id = ?", id).
-        Select("email").
-        Scan(&email).Error
-    return email, err
-}
-
-// Good: Use indexes efficiently
-func (r *userRepository) GetActiveUsers(ctx context.Context) ([]*entities.User, error) {
-    var models []UserModel
-    err := r.db.WithContext(ctx).
-        Where("status = ?", "active").  // Uses idx_users_status
-        Order("created_at DESC").       // Uses idx_users_created_at
-        Find(&models).Error
-    // ...
-}
-
-// Good: Use prepared statements (GORM does this automatically)
-func (r *userRepository) GetUsersByRole(ctx context.Context, role string) ([]*entities.User, error) {
-    var models []UserModel
-    err := r.db.WithContext(ctx).
-        Where("role = ?", role).  // Automatically prepared
-        Find(&models).Error
-    // ...
-}
-```
-
-### Avoid N+1 Queries
-
-```go
-// Bad: N+1 query problem
-func (r *userRepository) GetUsersWithProfiles(ctx context.Context) ([]*entities.User, error) {
-    users, err := r.List(ctx, 0, 100)
-    if err != nil {
-        return nil, err
-    }
-    
-    // This will execute N additional queries
-    for _, user := range users {
-        profile, _ := r.GetUserProfile(ctx, user.ID)  // N+1 problem!
-        user.Profile = profile
-    }
-    
-    return users, nil
-}
-
-// Good: Use joins or preloading
-func (r *userRepository) GetUsersWithProfiles(ctx context.Context) ([]*entities.User, error) {
-    var models []UserModel
-    err := r.db.WithContext(ctx).
-        Preload("Profile").  // Load related data in single query
-        Find(&models).Error
-    // ...
-}
-```
-
-### Connection Management
-
-```go
-// Good: Use context for timeouts
-func (r *userRepository) CreateUser(ctx context.Context, user *entities.User) error {
-    // Context will handle timeouts and cancellation
-    return r.db.WithContext(ctx).Create(user).Error
-}
-
-// Good: Use transactions for related operations
-func (s *UserService) CreateUserWithProfile(ctx context.Context, req *CreateUserRequest) error {
-    return s.db.Transaction(func(tx *gorm.DB) error {
-        // Both operations succeed or both fail
-        user := &UserModel{...}
-        if err := tx.Create(user).Error; err != nil {
-            return err
-        }
-        
-        profile := &ProfileModel{UserID: user.ID, ...}
-        return tx.Create(profile).Error
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+        Logger: logger.Default.LogMode(logger.Silent),
     })
+    
+    if err != nil {
+        t.Fatalf("Failed to connect to test database: %v", err)
+    }
+    
+    // Auto-migrate test schema
+    err = db.AutoMigrate(&domain.User{}, &domain.UserSession{})
+    if err != nil {
+        t.Fatalf("Failed to migrate test database: %v", err)
+    }
+    
+    return db
+}
+
+func TeardownTestDB(t *testing.T, db *gorm.DB) {
+    CleanupTestData(db)
+    
+    sqlDB, err := db.DB()
+    if err == nil {
+        sqlDB.Close()
+    }
 }
 ```
 
-## 🔧 Database Tools and Utilities
+### Integration Test Examples
+```go
+func TestUserRepository_Create(t *testing.T) {
+    db := SetupTestDB(t)
+    defer TeardownTestDB(t, db)
+    
+    repo := database.NewUserRepository(db)
+    
+    user := &domain.User{
+        Email:     "test@integration.com",
+        Password:  "hashedpassword",
+        FirstName: "Integration",
+        LastName:  "Test",
+    }
+    
+    createdUser, err := repo.Create(context.Background(), user)
+    
+    assert.NoError(t, err)
+    assert.NotEmpty(t, createdUser.ID)
+    assert.Equal(t, user.Email, createdUser.Email)
+    
+    // Verify in database
+    var dbUser domain.User
+    err = db.Where("email = ?", user.Email).First(&dbUser).Error
+    assert.NoError(t, err)
+    assert.Equal(t, user.Email, dbUser.Email)
+}
+```
 
-### Database Scripts
+## 🔐 Database Security
 
+### Connection Security
+```yaml
+# Production database configuration
+database:
+  host: "your-postgres-host"
+  port: 5432
+  username: "api_server_user"
+  password: "${DB_PASSWORD}"  # From environment
+  database: "api_server"
+  sslmode: "require"          # Force SSL
+  sslcert: "/path/to/client.crt"
+  sslkey: "/path/to/client.key"
+  sslrootcert: "/path/to/ca.crt"
+```
+
+### Access Control
+```sql
+-- Create application-specific user
+CREATE USER api_server_user WITH PASSWORD 'secure_password';
+
+-- Grant minimal required permissions
+GRANT CONNECT ON DATABASE api_server TO api_server_user;
+GRANT USAGE ON SCHEMA public TO api_server_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO api_server_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO api_server_user;
+
+-- Revoke unnecessary permissions
+REVOKE CREATE ON SCHEMA public FROM api_server_user;
+REVOKE ALL PRIVILEGES ON SCHEMA information_schema FROM api_server_user;
+```
+
+### Data Encryption
+```sql
+-- Encrypt sensitive data in application layer
+-- Passwords are already hashed with bcrypt
+-- Additional encryption for sensitive fields:
+
+-- Example: Encrypt user data at rest
+CREATE OR REPLACE FUNCTION encrypt_sensitive_data(data TEXT) 
+RETURNS TEXT AS $$
+BEGIN
+    RETURN pgp_sym_encrypt(data, 'your-encryption-key');
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION decrypt_sensitive_data(encrypted_data TEXT) 
+RETURNS TEXT AS $$
+BEGIN
+    RETURN pgp_sym_decrypt(encrypted_data, 'your-encryption-key');
+END;
+$$ LANGUAGE plpgsql;
+```
+
+## 📊 Monitoring and Maintenance
+
+### Database Health Monitoring
+```sql
+-- Connection monitoring
+SELECT 
+    count(*) as total_connections,
+    count(*) FILTER (WHERE state = 'active') as active_connections,
+    count(*) FILTER (WHERE state = 'idle') as idle_connections
+FROM pg_stat_activity 
+WHERE datname = 'api_server';
+
+-- Lock monitoring
+SELECT 
+    blocked_locks.pid AS blocked_pid,
+    blocked_activity.usename AS blocked_user,
+    blocking_locks.pid AS blocking_pid,
+    blocking_activity.usename AS blocking_user,
+    blocked_activity.query AS blocked_statement,
+    blocking_activity.query AS blocking_statement
+FROM pg_catalog.pg_locks blocked_locks
+JOIN pg_catalog.pg_stat_activity blocked_activity ON blocked_activity.pid = blocked_locks.pid
+JOIN pg_catalog.pg_locks blocking_locks ON (blocking_locks.locktype = blocked_locks.locktype
+    AND blocking_locks.database IS NOT DISTINCT FROM blocked_locks.database
+    AND blocking_locks.relation IS NOT DISTINCT FROM blocked_locks.relation)
+JOIN pg_catalog.pg_stat_activity blocking_activity ON blocking_activity.pid = blocking_locks.pid
+WHERE NOT blocked_locks.granted;
+
+-- Slow query monitoring
+SELECT 
+    query,
+    calls,
+    total_time,
+    mean_time,
+    rows
+FROM pg_stat_statements 
+ORDER BY total_time DESC 
+LIMIT 10;
+```
+
+### Automated Maintenance
 ```bash
-# scripts/db-backup.sh
 #!/bin/bash
-BACKUP_DIR="./backups"
+# scripts/db-maintenance.sh
+
+# Clean up expired tokens
+psql -U postgres -d api_server -c "SELECT cleanup_expired_tokens();"
+
+# Update table statistics
+psql -U postgres -d api_server -c "ANALYZE;"
+
+# Reindex if needed
+psql -U postgres -d api_server -c "REINDEX DATABASE api_server;"
+
+# Vacuum to reclaim space
+psql -U postgres -d api_server -c "VACUUM ANALYZE;"
+
+echo "Database maintenance completed at $(date)"
+```
+
+### Backup Strategy
+```bash
+#!/bin/bash
+# scripts/backup-db.sh
+
+BACKUP_DIR="/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
 DB_NAME="api_server"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-mkdir -p $BACKUP_DIR
-docker-compose exec postgres pg_dump -U postgres $DB_NAME > "$BACKUP_DIR/backup_${TIMESTAMP}.sql"
-echo "Backup created: $BACKUP_DIR/backup_${TIMESTAMP}.sql"
+# Create backup directory
+mkdir -p "$BACKUP_DIR"
+
+# Create full database backup
+pg_dump -U postgres -h localhost "$DB_NAME" > "$BACKUP_DIR/backup_${DB_NAME}_${DATE}.sql"
+
+# Create compressed backup
+pg_dump -U postgres -h localhost "$DB_NAME" | gzip > "$BACKUP_DIR/backup_${DB_NAME}_${DATE}.sql.gz"
+
+# Schema-only backup
+pg_dump -U postgres -h localhost --schema-only "$DB_NAME" > "$BACKUP_DIR/schema_${DB_NAME}_${DATE}.sql"
+
+# Clean up old backups (keep 30 days)
+find "$BACKUP_DIR" -name "backup_${DB_NAME}_*" -mtime +30 -delete
+
+echo "Database backup completed: backup_${DB_NAME}_${DATE}.sql.gz"
 ```
 
+### Restore Procedures
 ```bash
-# scripts/db-restore.sh
-#!/bin/bash
-if [ -z "$1" ]; then
-    echo "Usage: $0 <backup_file>"
-    exit 1
-fi
+# Restore from backup
+createdb api_server_restored
+psql -U postgres -d api_server_restored -f backup_api_server_20240101_120000.sql
 
-docker-compose exec -T postgres psql -U postgres api_server < "$1"
-echo "Database restored from: $1"
+# Restore from compressed backup
+createdb api_server_restored
+gunzip -c backup_api_server_20240101_120000.sql.gz | psql -U postgres -d api_server_restored
 ```
 
-### Database Seeding
+## 🎯 Best Practices
 
-```sql
--- scripts/seed-data.sql
--- Insert default admin user
-INSERT INTO users (
-    email, 
-    password, 
-    first_name, 
-    last_name, 
-    role, 
-    status,
-    email_verified
-) VALUES (
-    'admin@api-server.com',
-    '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', -- password: admin123
-    'System',
-    'Administrator',
-    'admin',
-    'active',
-    true
-) ON CONFLICT (email) DO NOTHING;
+### Development Best Practices
+1. **Use Transactions**: Wrap related operations in transactions
+2. **Connection Pooling**: Configure appropriate pool sizes
+3. **Index Strategy**: Add indexes for frequently queried columns
+4. **Query Optimization**: Use EXPLAIN ANALYZE for query optimization
+5. **Data Validation**: Validate data at application layer and use DB constraints
 
--- Insert test users for development
-INSERT INTO users (email, password, first_name, last_name, role) VALUES
-('user1@test.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Test', 'User1', 'user'),
-('user2@test.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Test', 'User2', 'user')
-ON CONFLICT (email) DO NOTHING;
-```
+### Production Best Practices
+1. **Monitoring**: Implement comprehensive database monitoring
+2. **Backups**: Regular automated backups with tested restore procedures
+3. **Security**: Use least privilege access and SSL connections
+4. **Maintenance**: Regular VACUUM, ANALYZE, and REINDEX operations
+5. **Scaling**: Consider read replicas for high-traffic applications
 
-## 🚨 Troubleshooting
+### Schema Evolution Best Practices
+1. **Migrations**: Use versioned migration scripts
+2. **Backward Compatibility**: Ensure schema changes don't break existing services
+3. **Testing**: Test migrations on staging before production
+4. **Rollback Plans**: Always have rollback procedures ready
 
-### Common Database Issues
-
-#### Connection Issues
-```bash
-# Check if PostgreSQL is running
-docker-compose ps postgres
-
-# Check PostgreSQL logs
-docker-compose logs postgres
-
-# Test connection
-docker-compose exec postgres pg_isready -U postgres
-
-# Connect manually
-docker-compose exec postgres psql -U postgres -d api_server
-```
-
-#### Performance Issues
-```sql
--- Check slow queries
-SELECT * FROM pg_stat_statements WHERE mean_exec_time > 1000;
-
--- Check locks
-SELECT * FROM pg_locks WHERE NOT granted;
-
--- Check connection count
-SELECT count(*) FROM pg_stat_activity;
-```
-
-#### Migration Issues
-```bash
-# Check migration status (manual tracking needed)
-psql -U postgres -d api_server -c "SELECT * FROM schema_migrations;"
-
-# Rollback last migration
-psql -U postgres -d api_server -f scripts/rollbacks/002_rollback.sql
-```
-
-For more database troubleshooting, check the [Setup Guide](SETUP_GUIDE.md) database section.
+This comprehensive database guide provides all the information needed to manage the PostgreSQL database effectively across the microservices architecture.

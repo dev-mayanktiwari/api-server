@@ -2,200 +2,281 @@
 
 ## What is API Server?
 
-API Server is a production-ready microservices application built with **Go**, implementing **Clean Architecture** principles. It provides a complete user management system with JWT authentication, role-based access control, and enterprise-grade deployment capabilities.
+API Server is a **production-ready microservices application** built with **Go**, implementing **Clean Architecture** principles across multiple services. It provides a complete user management system with JWT authentication, role-based access control, and enterprise-grade deployment capabilities.
 
-## 🎯 Purpose
+## 🎯 Purpose & Goals
 
 This project demonstrates:
-- **Clean Architecture** implementation in Go
-- **Microservices** design patterns
-- **Production-ready** deployment configurations
-- **Enterprise-grade** security and monitoring
-- **Comprehensive testing** strategies
+- **True Microservices Architecture** with proper service separation
+- **Clean Architecture** implementation in Go with domain-driven design
+- **Enterprise-grade security** with JWT authentication and RBAC
+- **Production-ready deployment** with Docker and Kubernetes
+- **Zero code duplication** through shared libraries
+- **Service-to-service communication** patterns
+- **Comprehensive monitoring** and observability
 
 ## 🏗️ High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    API Server System                        │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
-│  │   Client    │    │  API Gateway │    │ Load Balancer│    │
-│  │Applications │◄──►│   (Nginx)   │◄──►│  (Optional) │     │
-│  └─────────────┘    └─────────────┘    └─────────────┘     │
-├─────────────────────────────────────────────────────────────┤
-│                   Microservices Layer                       │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │              User Service (Port 8082)                   ││
-│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐       ││
-│  │  │   Domain    │ │Application  │ │Infrastructure│      ││
-│  │  │   Layer     │ │   Layer     │ │    Layer     │      ││
-│  │  └─────────────┘ └─────────────┘ └─────────────┘       ││
-│  └─────────────────────────────────────────────────────────┘│
-├─────────────────────────────────────────────────────────────┤
-│                   Shared Libraries                          │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │  Auth │ Config │ Logger │ Database │ Middleware │ etc.  ││
-│  └─────────────────────────────────────────────────────────┘│
-├─────────────────────────────────────────────────────────────┤
-│                   Data & Cache Layer                        │
-│  ┌─────────────┐              ┌─────────────┐              │
-│  │ PostgreSQL  │              │    Redis    │              │
-│  │ (Database)  │              │   (Cache)   │              │
-│  └─────────────┘              └─────────────┘              │
-├─────────────────────────────────────────────────────────────┤
-│                 Monitoring & Logging                        │
-│  ┌─────────────┐              ┌─────────────┐              │
-│  │ Prometheus  │              │   Grafana   │              │
-│  │ (Metrics)   │              │(Dashboards) │              │
-│  └─────────────┘              └─────────────┘              │
+│                Load Balancer (Nginx)                       │
+│                     Port: 80/443                           │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────────┐
+│                  API Gateway                                │
+│                  Port: 8080                                 │
+│ • Request Routing    • JWT Validation    • Rate Limiting    │
+│ • CORS Handling      • Correlation IDs   • User Context     │
+└──────────┬─────────────────────┬────────────────────────────┘
+           │                     │
+┌──────────▼──────────┐ ┌───────▼──────────────────────────────┐
+│   Auth Service      │ │         User Service                 │
+│   Port: 8081        │ │         Port: 8082                   │
+│ • User Login        │ │ • User Registration                  │
+│ • JWT Generation    │ │ • Profile Management                 │
+│ • Token Validation  │ │ • Password Operations                │
+│ • Token Refresh     │ │ • Admin User Management              │
+│ • Session Management│ │ • User Statistics                    │
+└─────────────────────┘ └──────────────────────────────────────┘
+           │                     │
+           └─────────┬───────────┘
+                     │
+┌────────────────────▼────────────────────────────────────────┐
+│              Shared Infrastructure                          │
+│  ┌─────────────────────┐  ┌─────────────────────┐          │
+│  │   PostgreSQL 15     │  │      Redis 7        │          │
+│  │ • User Data         │  │ • Sessions          │          │
+│  │ • JWT Sessions      │  │ • Rate Limiting     │          │
+│  │ • Audit Logs        │  │ • Caching           │          │
+│  └─────────────────────┘  └─────────────────────┘          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ## 🛠️ Technology Stack
 
 ### Core Technologies
-- **Language**: Go 1.21+
-- **Web Framework**: Gin (HTTP routing)
-- **Database**: PostgreSQL 15+ 
-- **Cache**: Redis 7+
-- **ORM**: GORM (Object-Relational Mapping)
+- **Language**: Go 1.21+ with modern practices
+- **Web Framework**: Gin (high-performance HTTP router)
+- **Database**: PostgreSQL 15+ with GORM ORM
+- **Cache**: Redis 7+ for sessions and rate limiting
+- **Authentication**: JWT with refresh tokens
 
-### Development Tools
-- **Hot Reload**: Air (development)
-- **Testing**: testify (mocking and assertions)
-- **Linting**: golangci-lint
-- **Documentation**: Markdown
+### Microservices Components
+- **API Gateway**: Request routing and authentication
+- **Auth Service**: JWT management and user authentication
+- **User Service**: User CRUD operations and management
+- **Load Balancer**: Nginx for traffic distribution
 
-### Deployment & DevOps
-- **Containerization**: Docker & Docker Compose
-- **Orchestration**: Kubernetes
-- **Reverse Proxy**: Nginx
-- **Monitoring**: Prometheus + Grafana
-- **CI/CD**: GitHub Actions (configurable)
+### Development & Deployment
+- **Containerization**: Docker with multi-stage builds
+- **Orchestration**: Kubernetes with auto-scaling
+- **Development**: Hot reload with Air
+- **Monitoring**: Health checks and structured logging
+- **CI/CD**: Docker builds and Kubernetes deployment
 
-## 📦 Services Overview
+## 📦 Microservices Overview
 
-### User Service
-**Purpose**: Complete user lifecycle management
-**Port**: 8082
+### 🌐 API Gateway (Port 8080)
+**Purpose**: Central entry point for all client requests
+
 **Responsibilities**:
-- User registration and authentication
-- Profile management
-- Password operations
-- Admin user management
-- JWT token handling
+- Route requests to appropriate downstream services
+- Validate JWT tokens for protected endpoints
+- Implement rate limiting per client IP
+- Add correlation IDs for distributed tracing
+- Handle CORS policies and security headers
+- Propagate user context to downstream services
 
-**Architecture Layers**:
-- **Domain**: Business entities and repository contracts
-- **Application**: Use cases and data transfer objects
-- **Infrastructure**: Database implementations and HTTP handlers
+**Key Features**:
+- Proxy service with proper header handling
+- Service health check aggregation
+- Request/response logging with performance metrics
+- Graceful shutdown and connection draining
+
+### 🔐 Auth Service (Port 8081)
+**Purpose**: Dedicated authentication and JWT token management
+
+**Responsibilities**:
+- User login and logout operations
+- JWT token generation with configurable expiration
+- Token validation and refresh functionality
+- Session management with database storage
+- Integration with User Service for credential validation
+
+**Architecture**:
+- **Domain Layer**: Token entities and authentication business rules
+- **Application Layer**: Auth use cases and token services
+- **Infrastructure Layer**: Database repositories and HTTP handlers
+
+### 👥 User Service (Port 8082)
+**Purpose**: Complete user lifecycle and data management
+
+**Responsibilities**:
+- User registration with validation
+- User profile management (CRUD operations)
+- Password change and security operations
+- Admin user management capabilities
+- User statistics and reporting
+
+**Architecture**:
+- **Domain Layer**: User entities, roles, and business logic
+- **Application Layer**: User use cases and application services
+- **Infrastructure Layer**: Database repositories and REST handlers
+
+### ⚖️ Load Balancer (Nginx)
+**Purpose**: Traffic distribution and SSL termination
+
+**Responsibilities**:
+- Route traffic to API Gateway instances
+- SSL/TLS termination for HTTPS
+- Static content serving capabilities
+- Health check routing to individual services
+- Security headers and rate limiting
+
+## 🔗 Shared Libraries Architecture
+
+Located in `shared/pkg/`, these libraries eliminate code duplication:
+
+### 🔐 Auth Library
+- JWT token utilities (generate, validate, parse)
+- Password hashing with bcrypt
+- Authentication middleware with role checking
+- User context extraction and propagation
+
+### ⚙️ Configuration Management
+- Environment-based configuration using Viper
+- Hot configuration reloading
+- Environment variable overrides
+- Configuration validation
+
+### 🗄️ Database Utilities
+- PostgreSQL connection with pooling
+- GORM integration with auto-migration
+- Repository pattern helpers
+- Health check utilities
+
+### 📊 Additional Libraries
+- **Logger**: Structured JSON logging with correlation IDs
+- **Middleware**: CORS, rate limiting, security headers
+- **Response**: Standardized API response formats
+- **Errors**: Application error handling
 
 ## 🔑 Core Features
 
-### Security
-- **JWT Authentication**: Secure token-based auth
-- **Role-Based Access Control (RBAC)**: User and admin roles
-- **Password Hashing**: bcrypt with salt
+### Security & Authentication
+- **JWT Authentication**: Stateless tokens with refresh capability
+- **Role-Based Access Control**: User and admin roles
+- **Password Security**: bcrypt hashing with salt
 - **Rate Limiting**: Per-client request throttling
 - **Input Validation**: Comprehensive request validation
 - **Security Headers**: CORS, CSP, and security headers
 
-### Database
+### Database & Persistence
 - **Connection Pooling**: Efficient database connections
-- **Migrations**: Automated database schema management
-- **Health Checks**: Database connectivity monitoring
+- **Auto-Migration**: Automated schema management
 - **Transaction Support**: ACID compliance
+- **Health Monitoring**: Database connectivity checks
+- **Audit Logging**: Complete user action tracking
 
-### Configuration
-- **Environment-Specific**: Dev, staging, prod configs
-- **Hot Reload**: Configuration changes without restart
-- **Environment Variables**: Override any config value
-- **Validation**: Configuration validation on startup
+### Service Communication
+- **HTTP-based**: RESTful service communication
+- **Context Propagation**: User context across services
+- **Correlation IDs**: Request tracing and debugging
+- **Error Handling**: Proper error propagation
+- **Timeout Management**: Service call timeouts
 
-### Testing
-- **Unit Tests**: Business logic testing with mocks
-- **Integration Tests**: API endpoint testing with real database
-- **Test Utilities**: Shared testing helpers and fixtures
-- **Mocking**: Repository and service layer mocks
-
-### Deployment
-- **Multi-Stage Builds**: Optimized Docker images
-- **Container Security**: Non-root users, read-only filesystems
-- **Kubernetes Native**: Complete K8s deployment manifests
-- **Auto-Scaling**: Horizontal Pod Autoscaler configuration
-- **Health Probes**: Liveness, readiness, and startup probes
+### Deployment & Operations
+- **Container-Native**: Docker with multi-stage builds
+- **Kubernetes-Ready**: Complete K8s manifests
+- **Health Probes**: Liveness, readiness, startup checks
+- **Graceful Shutdown**: Proper connection draining
+- **Resource Limits**: Memory and CPU constraints
 
 ## 🌐 API Capabilities
 
 ### Public Endpoints
-- User registration
-- User authentication
-- Health checks
+- User registration with validation
+- User authentication and JWT generation
+- Service health and readiness checks
 
 ### Protected Endpoints (User Role)
 - Profile retrieval and updates
-- Password changes
+- Password change operations
 - Personal data management
 
 ### Admin Endpoints (Admin Role)
-- User listing with pagination
-- User management (CRUD operations)
-- System administration
+- User listing with pagination and filtering
+- User management operations (CRUD)
+- System administration and monitoring
 
 ## 📊 Monitoring & Observability
 
 ### Logging
 - **Structured Logging**: JSON format for production
-- **Log Levels**: Debug, Info, Warn, Error
+- **Log Levels**: Debug, Info, Warn, Error, Fatal
 - **Correlation IDs**: Request tracing across services
-- **Contextual Data**: User context and performance metrics
-
-### Metrics
-- **HTTP Metrics**: Request duration, count, and status codes
-- **Database Metrics**: Connection pool statistics
-- **Business Metrics**: User registration, login counts
-- **System Metrics**: CPU, memory, and disk usage
+- **User Context**: User ID and role in logs
+- **Performance Metrics**: Response times and errors
 
 ### Health Monitoring
-- **Service Health**: `/health` endpoint
-- **Readiness Check**: `/ready` endpoint for K8s
+- **Service Health**: `/health` endpoint on each service
+- **Readiness Checks**: `/ready` with dependency validation
 - **Database Health**: Connection and query performance
-- **Dependency Checks**: External service availability
+- **Service Discovery**: Health aggregation at gateway level
 
-## 🚀 Deployment Options
+### Metrics Collection
+- HTTP request metrics (count, duration, status codes)
+- Database connection pool statistics
+- Authentication success/failure rates
+- User registration and activity metrics
 
-### Local Development
-- Direct Go execution with hot reload
-- Docker Compose with development tools
-- Database and Redis via containers
+## 🚀 Deployment Architecture
 
-### Staging/Testing
-- Docker Compose with production-like configuration
-- Kubernetes deployment with staging secrets
-- Database migrations and seed data
+### Development Environment
+- **Docker Compose**: Complete development stack
+- **Hot Reload**: Air for Go hot reloading
+- **Development Tools**: pgAdmin, Redis Insight
+- **Debug Configuration**: Enhanced logging and debugging
 
-### Production
-- Kubernetes cluster deployment
-- Load balancer and ingress configuration
-- Monitoring and alerting setup
-- Backup and disaster recovery
+### Production Environment
+- **Kubernetes Cluster**: Auto-scaling and load balancing
+- **Multiple Replicas**: High availability configuration
+- **Resource Management**: CPU and memory limits
+- **Security Context**: Non-root containers, read-only filesystems
 
-## 📝 Project Goals
+### Container Strategy
+- **Multi-stage Builds**: Optimized production images
+- **Security**: Non-root users, minimal attack surface
+- **Health Checks**: Built-in container health monitoring
+- **Configuration**: Environment-based configuration
 
-1. **Educational**: Demonstrate clean architecture in Go
-2. **Production-Ready**: Real-world deployment capabilities
-3. **Scalable**: Microservices design for horizontal scaling
-4. **Maintainable**: Clear separation of concerns and documentation
-5. **Secure**: Enterprise-grade security implementations
-6. **Observable**: Comprehensive monitoring and logging
+## 🎯 Project Goals & Benefits
+
+### Educational Value
+- **Clean Architecture**: Demonstrates proper layered architecture
+- **Microservices Patterns**: Service separation and communication
+- **Go Best Practices**: Modern Go development patterns
+- **DevOps Integration**: Complete deployment pipeline
+
+### Production Readiness
+- **Scalable Architecture**: Horizontal scaling capabilities
+- **Security**: Enterprise-grade security implementations
+- **Monitoring**: Comprehensive observability
+- **Deployment**: Cloud-native deployment strategies
+
+### Development Experience
+- **Developer-Friendly**: Easy local setup and development
+- **Documentation**: Comprehensive guides and API docs
+- **Testing**: Unit and integration testing frameworks
+- **Tooling**: Modern development tools integration
 
 ## 🎯 Target Audience
 
-- **Go Developers** learning clean architecture
-- **DevOps Engineers** implementing microservices deployments
+- **Go Developers** learning clean architecture and microservices
+- **DevOps Engineers** implementing container-native applications
 - **System Architects** designing scalable backend systems
-- **Students** studying production-grade application development
-- **Teams** building enterprise applications
+- **Development Teams** building enterprise applications
+- **Students** studying production-grade software development
 
-This project serves as both a learning resource and a foundation for building production microservices applications with Go.
+This project serves as both a learning resource and a foundation for building production microservices applications with modern Go practices and cloud-native deployment strategies.

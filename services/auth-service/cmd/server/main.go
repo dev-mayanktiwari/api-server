@@ -12,24 +12,61 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/auth"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/config"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/database"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/middleware"
 	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/infrastructure/http/handlers"
 	"github.com/dev-mayanktiwari/api-server/services/auth-service/internal/application/services"
+	authDB "github.com/dev-mayanktiwari/api-server/services/auth-service/internal/infrastructure/database"
 )
 
+// Config represents the application configuration
+type Config struct {
+	config.BaseConfig `mapstructure:",squash"`
+	Server            config.ServerConfig     `mapstructure:"server" json:"server" yaml:"server"`
+	Database          config.DatabaseConfig   `mapstructure:"database" json:"database" yaml:"database"`
+	JWT               config.JWTConfig        `mapstructure:"jwt" json:"jwt" yaml:"jwt"`
+	Logging           *logger.Config          `mapstructure:"logging" json:"logging" yaml:"logging"`
+	RateLimit         config.RateLimitConfig  `mapstructure:"rate_limit" json:"rate_limit" yaml:"rate_limit"`
+	CORS              config.CORSConfig       `mapstructure:"cors" json:"cors" yaml:"cors"`
+}
+
 func main() {
+	// Create configuration manager
+	configManager := config.New(&config.Options{
+		ConfigName:  "config",
+		ConfigPaths: []string{".", "./configs/auth-service", "../configs/auth-service"},
+		ConfigType:  "yaml",
+		EnvPrefix:   "AUTH_SERVICE",
+	})
+
 	// Load configuration
-	cfg := config.New(config.DefaultOptions())
-	err := config.LoadFromFile("AUTH_SERVICE", cfg)
-	if err != nil {
+	cfg := &Config{}
+	if err := configManager.Load(cfg); err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Initialize logger
-	appLogger, err := logger.New(&cfg.Logging)
+	// Set defaults if not specified
+	if cfg.Environment == "" {
+		cfg.Environment = "development"
+	}
+	if cfg.ServiceName == "" {
+		cfg.ServiceName = "auth-service"
+	}
+	if cfg.Version == "" {
+		cfg.Version = "v1.0.0"
+	}
+
+	// Initialize logger (use defaults if not configured)
+	if cfg.Logging == nil {
+		cfg.Logging = logger.DefaultConfig()
+	}
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 8081
+	}
+	appLogger, err := logger.New(cfg.Logging)
 	if err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
@@ -47,7 +84,7 @@ func main() {
 	}()
 
 	// Auto-migrate tables
-	if err := db.Migrate(&database.TokenModel{}); err != nil {
+	if err := db.Migrate(&authDB.TokenModel{}); err != nil {
 		appLogger.WithError(err).Fatal("Failed to migrate database")
 	}
 
@@ -55,9 +92,9 @@ func main() {
 	jwtManager := auth.NewJWTManager(&cfg.JWT, appLogger)
 
 	// Initialize repositories
-	tokenRepo := database.NewRepository(db)
+	tokenRepo := authDB.NewTokenRepository(*db, appLogger)
 
-	// Initialize services
+	// Initialize services  
 	authService := services.NewAuthApplicationService(tokenRepo, jwtManager, appLogger)
 
 	// Initialize handlers

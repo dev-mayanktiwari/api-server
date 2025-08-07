@@ -113,7 +113,7 @@ func (s *ProxyService) ProxyToService(c *gin.Context, serviceURL string) {
 	// Execute the request
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		s.logger.WithError(err).WithField("target_url", targetURL).Error("Failed to proxy request")
+		s.logger.WithError(err).WithFields(logger.Fields{"target_url": targetURL}).Error("Failed to proxy request")
 		response.BadGateway(c, "Service temporarily unavailable")
 		return
 	}

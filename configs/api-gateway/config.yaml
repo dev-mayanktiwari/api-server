@@ -45,5 +45,5 @@ cors:
 
 # Service URLs (can be overridden by environment variables)
 services:
-  auth_service_url: "http://auth-service:8081"
-  user_service_url: "http://user-service:8082"
+  auth_service_url: "http://localhost:8081"
+  user_service_url: "http://localhost:8082"

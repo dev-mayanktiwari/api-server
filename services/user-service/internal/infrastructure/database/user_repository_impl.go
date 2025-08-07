@@ -3,10 +3,11 @@ package database
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/database"
-	"github.com/dev-mayanktiwari/api-server/shared/pkg/errors"
+	sharedErrors "github.com/dev-mayanktiwari/api-server/shared/pkg/errors"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
 	"github.com/dev-mayanktiwari/api-server/services/user-service/internal/domain/entities"
 	"github.com/dev-mayanktiwari/api-server/services/user-service/internal/domain/repositories"
@@ -86,7 +87,7 @@ func (r *UserRepositoryImpl) Create(ctx context.Context, user *entities.User) er
 
 	if err := r.db.WithContext(ctx).Create(model).Error; err != nil {
 		r.logger.LogDatabaseQuery("INSERT INTO users", time.Since(start), err)
-		return errors.Wrap(err, errors.CodeDatabaseError, "Failed to create user", 500)
+		return sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to create user", 500)
 	}
 
 	// Update the user ID from the database
@@ -106,7 +107,7 @@ func (r *UserRepositoryImpl) GetByID(ctx context.Context, id string) (*entities.
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil // Return nil, nil for not found
 		}
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "Failed to get user by ID", 500)
+		return nil, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to get user by ID", 500)
 	}
 
 	return model.ToEntity(), nil
@@ -124,7 +125,7 @@ func (r *UserRepositoryImpl) GetByEmail(ctx context.Context, email string) (*ent
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil // Return nil, nil for not found
 		}
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "Failed to get user by email", 500)
+		return nil, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to get user by email", 500)
 	}
 
 	return model.ToEntity(), nil
@@ -142,7 +143,7 @@ func (r *UserRepositoryImpl) Update(ctx context.Context, user *entities.User) er
 	r.logger.LogDatabaseQuery("UPDATE users SET ... WHERE id = ?", time.Since(start), err)
 	
 	if err != nil {
-		return errors.Wrap(err, errors.CodeDatabaseError, "Failed to update user", 500)
+		return sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to update user", 500)
 	}
 
 	return nil
@@ -156,7 +157,7 @@ func (r *UserRepositoryImpl) Delete(ctx context.Context, id string) error {
 	r.logger.LogDatabaseQuery("UPDATE users SET deleted_at = ? WHERE id = ?", time.Since(start), err)
 	
 	if err != nil {
-		return errors.Wrap(err, errors.CodeDatabaseError, "Failed to delete user", 500)
+		return sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to delete user", 500)
 	}
 
 	return nil
@@ -172,7 +173,7 @@ func (r *UserRepositoryImpl) List(ctx context.Context, offset, limit int) ([]*en
 	// Get total count
 	if err := r.db.WithContext(ctx).Model(&UserModel{}).Count(&total).Error; err != nil {
 		r.logger.LogDatabaseQuery("SELECT COUNT(*) FROM users", time.Since(start), err)
-		return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "Failed to count users", 500)
+		return nil, 0, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to count users", 500)
 	}
 
 	// Get paginated results
@@ -180,7 +181,7 @@ func (r *UserRepositoryImpl) List(ctx context.Context, offset, limit int) ([]*en
 	r.logger.LogDatabaseQuery("SELECT * FROM users LIMIT ? OFFSET ?", time.Since(start), err)
 	
 	if err != nil {
-		return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "Failed to list users", 500)
+		return nil, 0, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to list users", 500)
 	}
 
 	// Convert to entities
@@ -201,7 +202,7 @@ func (r *UserRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (b
 	r.logger.LogDatabaseQuery("SELECT COUNT(*) FROM users WHERE email = ?", time.Since(start), err)
 	
 	if err != nil {
-		return false, errors.Wrap(err, errors.CodeDatabaseError, "Failed to check user existence", 500)
+		return false, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to check user existence", 500)
 	}
 
 	return count > 0, nil
@@ -216,7 +217,7 @@ func (r *UserRepositoryImpl) ExistsByID(ctx context.Context, id string) (bool, e
 	r.logger.LogDatabaseQuery("SELECT COUNT(*) FROM users WHERE id = ?", time.Since(start), err)
 	
 	if err != nil {
-		return false, errors.Wrap(err, errors.CodeDatabaseError, "Failed to check user existence", 500)
+		return false, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to check user existence", 500)
 	}
 
 	return count > 0, nil
@@ -236,7 +237,7 @@ func (r *UserRepositoryImpl) UpdatePassword(ctx context.Context, id, hashedPassw
 	r.logger.LogDatabaseQuery("UPDATE users SET password = ?, updated_at = ? WHERE id = ?", time.Since(start), err)
 	
 	if err != nil {
-		return errors.Wrap(err, errors.CodeDatabaseError, "Failed to update password", 500)
+		return sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to update password", 500)
 	}
 
 	return nil
@@ -252,7 +253,7 @@ func (r *UserRepositoryImpl) GetActiveUsers(ctx context.Context, offset, limit i
 	// Get total count of active users
 	if err := r.db.WithContext(ctx).Model(&UserModel{}).Where("status = ?", "active").Count(&total).Error; err != nil {
 		r.logger.LogDatabaseQuery("SELECT COUNT(*) FROM users WHERE status = 'active'", time.Since(start), err)
-		return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "Failed to count active users", 500)
+		return nil, 0, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to count active users", 500)
 	}
 
 	// Get paginated results
@@ -260,7 +261,7 @@ func (r *UserRepositoryImpl) GetActiveUsers(ctx context.Context, offset, limit i
 	r.logger.LogDatabaseQuery("SELECT * FROM users WHERE status = 'active' LIMIT ? OFFSET ?", time.Since(start), err)
 	
 	if err != nil {
-		return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "Failed to list active users", 500)
+		return nil, 0, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to list active users", 500)
 	}
 
 	// Convert to entities
@@ -282,7 +283,7 @@ func (r *UserRepositoryImpl) GetUsersByRole(ctx context.Context, role entities.U
 	// Get total count
 	if err := r.db.WithContext(ctx).Model(&UserModel{}).Where("role = ?", string(role)).Count(&total).Error; err != nil {
 		r.logger.LogDatabaseQuery("SELECT COUNT(*) FROM users WHERE role = ?", time.Since(start), err)
-		return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "Failed to count users by role", 500)
+		return nil, 0, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to count users by role", 500)
 	}
 
 	// Get paginated results
@@ -290,7 +291,7 @@ func (r *UserRepositoryImpl) GetUsersByRole(ctx context.Context, role entities.U
 	r.logger.LogDatabaseQuery("SELECT * FROM users WHERE role = ? LIMIT ? OFFSET ?", time.Since(start), err)
 	
 	if err != nil {
-		return nil, 0, errors.Wrap(err, errors.CodeDatabaseError, "Failed to list users by role", 500)
+		return nil, 0, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to list users by role", 500)
 	}
 
 	// Convert to entities
@@ -311,33 +312,33 @@ func (r *UserRepositoryImpl) GetUserStats(ctx context.Context) (*repositories.Us
 	// Total users
 	if err := r.db.WithContext(ctx).Model(&UserModel{}).Count(&stats.TotalUsers).Error; err != nil {
 		r.logger.LogDatabaseQuery("SELECT COUNT(*) FROM users", time.Since(start), err)
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "Failed to count total users", 500)
+		return nil, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to count total users", 500)
 	}
 
 	// Active users
 	if err := r.db.WithContext(ctx).Model(&UserModel{}).Where("status = ?", "active").Count(&stats.ActiveUsers).Error; err != nil {
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "Failed to count active users", 500)
+		return nil, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to count active users", 500)
 	}
 
 	// Inactive users
 	if err := r.db.WithContext(ctx).Model(&UserModel{}).Where("status = ?", "inactive").Count(&stats.InactiveUsers).Error; err != nil {
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "Failed to count inactive users", 500)
+		return nil, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to count inactive users", 500)
 	}
 
 	// Suspended users
 	if err := r.db.WithContext(ctx).Model(&UserModel{}).Where("status = ?", "suspended").Count(&stats.SuspendedUsers).Error; err != nil {
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "Failed to count suspended users", 500)
+		return nil, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to count suspended users", 500)
 	}
 
 	// Admin users
 	if err := r.db.WithContext(ctx).Model(&UserModel{}).Where("role = ?", "admin").Count(&stats.AdminUsers).Error; err != nil {
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "Failed to count admin users", 500)
+		return nil, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to count admin users", 500)
 	}
 
 	// Regular users
 	if err := r.db.WithContext(ctx).Model(&UserModel{}).Where("role = ?", "user").Count(&stats.RegularUsers).Error; err != nil {
 		r.logger.LogDatabaseQuery("User statistics query completed", time.Since(start), err)
-		return nil, errors.Wrap(err, errors.CodeDatabaseError, "Failed to count regular users", 500)
+		return nil, sharedErrors.Wrap(err, sharedErrors.CodeDatabaseError, "Failed to count regular users", 500)
 	}
 
 	r.logger.LogDatabaseQuery("User statistics query completed", time.Since(start), nil)

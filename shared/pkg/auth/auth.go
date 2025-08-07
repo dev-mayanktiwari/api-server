@@ -4,6 +4,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/config"
-	"github.com/dev-mayanktiwari/api-server/shared/pkg/errors"
+	sharedErrors "github.com/dev-mayanktiwari/api-server/shared/pkg/errors"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/response"
 )
@@ -128,14 +129,14 @@ func (m *JWTManager) ValidateToken(tokenString string) (*Claims, error) {
 	
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			return nil, errors.TokenExpired("Token has expired")
+			return nil, sharedErrors.TokenExpired("Token has expired")
 		}
-		return nil, errors.InvalidToken("Invalid token")
+		return nil, sharedErrors.InvalidToken("Invalid token")
 	}
 	
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
-		return nil, errors.InvalidToken("Invalid token claims")
+		return nil, sharedErrors.InvalidToken("Invalid token claims")
 	}
 	
 	return claims, nil
@@ -155,12 +156,12 @@ func (m *JWTManager) RefreshToken(refreshTokenString string) (string, error) {
 // ExtractTokenFromHeader extracts JWT token from Authorization header
 func ExtractTokenFromHeader(authHeader string) (string, error) {
 	if authHeader == "" {
-		return "", errors.Unauthorized("Missing authorization header")
+		return "", sharedErrors.Unauthorized("Missing authorization header")
 	}
 	
 	parts := strings.SplitN(authHeader, " ", 2)
 	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		return "", errors.Unauthorized("Invalid authorization header format")
+		return "", sharedErrors.Unauthorized("Invalid authorization header format")
 	}
 	
 	return parts[1], nil
@@ -171,7 +172,7 @@ func ExtractTokenFromHeader(authHeader string) (string, error) {
 // HashPassword hashes a password using bcrypt
 func HashPassword(password string) (string, error) {
 	if len(password) < 8 {
-		return "", errors.Validation("Password must be at least 8 characters long")
+		return "", sharedErrors.Validation("Password must be at least 8 characters long")
 	}
 	
 	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -202,7 +203,7 @@ func AuthMiddleware(jwtManager *JWTManager) gin.HandlerFunc {
 		
 		claims, err := jwtManager.ValidateToken(tokenString)
 		if err != nil {
-			if appErr, ok := errors.AsAppError(err); ok {
+			if appErr, ok := sharedErrors.AsAppError(err); ok {
 				response.Error(c, appErr.HTTPStatus, appErr.Code, appErr.Message)
 			} else {
 				response.Unauthorized(c, "Invalid token")

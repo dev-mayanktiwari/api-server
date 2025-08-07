@@ -1,84 +1,182 @@
 # Development Guide
 
-Complete guide for developers working on the API Server project, including development workflows, coding standards, testing practices, and contribution guidelines.
+Complete guide for developers working on the API Server microservices project, including development workflows, coding standards, testing practices, and contribution guidelines.
 
-## 🚀 Development Environment
+## 🚀 Development Environment Setup
 
 ### Quick Start for Developers
 
 ```bash
-# 1. Clone and setup
+# 1. Clone and setup dependencies
 git clone <repository-url>
 cd api-server
-go mod tidy && cd shared && go mod tidy && cd ..
+go mod tidy
 
-# 2. Start development environment
-docker-compose -f docker-compose.dev.yml up -d
+# Setup shared libraries
+cd shared && go mod tidy && cd ..
+
+# Setup each service
+cd services/api-gateway && go mod tidy && cd ../..
+cd services/auth-service && go mod tidy && cd ../..
+cd services/user-service && go mod tidy && cd ../..
+
+# 2. Start infrastructure services
+docker-compose -f docker-compose.microservices.yml up -d postgres redis
 
 # 3. Start development with hot reload
-cd services/user-service
-air
+cd services/user-service && air &
+cd services/auth-service && air &
+cd services/api-gateway && air &
 
-# 4. Access development tools
-# - API: http://localhost:8082
-# - pgAdmin: http://localhost:5050
-# - RedisInsight: http://localhost:8001
+# 4. Access development environment
+# - User Service: http://localhost:8082
+# - Auth Service: http://localhost:8081
+# - API Gateway: http://localhost:8080
 ```
 
 ### Development Tools Setup
 
-#### Install Air for Hot Reload
+#### Install Essential Tools
 ```bash
+# Hot reload for Go
 go install github.com/cosmtrek/air@latest
-```
 
-#### Install Testing Tools
-```bash
+# Linting and formatting
 go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# Testing framework
 go install github.com/stretchr/testify@latest
+
+# API testing tools
+go install github.com/rakyll/hey@latest
 ```
 
-#### VS Code Extensions (Recommended)
-- Go (Google)
-- Docker (Microsoft)
-- YAML (Red Hat)
-- REST Client (Huachao Mao)
-- GitLens (GitKraken)
+#### Recommended VS Code Extensions
+- **Go** (Google) - Go language support
+- **Docker** (Microsoft) - Docker integration
+- **YAML** (Red Hat) - YAML file support
+- **REST Client** (Huachao Mao) - API testing
+- **GitLens** (GitKraken) - Git integration
+- **Thunder Client** - API testing alternative
 
-## 🏗️ Project Structure Deep Dive
+## 🏗️ Project Architecture Deep Dive
 
+### Microservices Structure
 ```
 api-server/
-├── services/user-service/           # User Service (Clean Architecture)
-│   ├── cmd/server/main.go          # Application entry point
-│   ├── internal/
-│   │   ├── application/            # Application Layer
-│   │   │   ├── dto/               # Data Transfer Objects
-│   │   │   └── services/          # Application Services (Use Cases)
-│   │   ├── domain/                # Domain Layer
-│   │   │   ├── entities/          # Business Entities
-│   │   │   ├── repositories/      # Repository Interfaces
-│   │   │   └── services/          # Domain Services
-│   │   └── infrastructure/        # Infrastructure Layer
-│   │       ├── database/          # Database Implementations
-│   │       └── http/handlers/     # HTTP Handlers
-│   └── go.mod                     # Service Dependencies
-├── shared/pkg/                     # Shared Libraries
-│   ├── auth/                      # JWT Authentication
-│   ├── config/                    # Configuration Management
-│   ├── database/                  # Database Utilities
-│   ├── logger/                    # Structured Logging
-│   ├── middleware/                # HTTP Middleware
-│   └── response/                  # API Response Utilities
-├── tests/                         # Testing Framework
-│   ├── unit/                      # Unit Tests
-│   ├── integration/               # Integration Tests
-│   ├── mocks/                     # Mock Implementations
-│   └── utils/                     # Test Utilities
-└── configs/                       # Environment Configurations
-    ├── development/
-    ├── staging/
-    └── production/
+├── services/                           # Individual Microservices
+│   ├── api-gateway/                   # API Gateway Service
+│   │   ├── cmd/server/main.go         # Entry point
+│   │   ├── internal/
+│   │   │   ├── application/           # Application layer
+│   │   │   │   └── services/         # Proxy services
+│   │   │   └── infrastructure/        # Infrastructure layer
+│   │   │       └── http/handlers/    # HTTP handlers
+│   │   ├── Dockerfile                 # Container definition
+│   │   └── go.mod                     # Service dependencies
+│   ├── auth-service/                  # Authentication Service
+│   │   ├── cmd/server/main.go         # Entry point
+│   │   ├── internal/
+│   │   │   ├── application/           # Application layer
+│   │   │   │   ├── dto/              # Data transfer objects
+│   │   │   │   └── services/         # Use cases
+│   │   │   ├── domain/               # Domain layer
+│   │   │   │   ├── entities/         # Business entities
+│   │   │   │   ├── repositories/     # Repository interfaces
+│   │   │   │   └── services/         # Domain services
+│   │   │   └── infrastructure/        # Infrastructure layer
+│   │   │       ├── database/         # Database implementations
+│   │   │       └── http/handlers/    # HTTP handlers
+│   │   └── go.mod
+│   └── user-service/                  # User Management Service
+│       ├── cmd/server/main.go         # Entry point
+│       ├── internal/                  # Clean architecture layers
+│       │   ├── application/           # Application layer
+│       │   ├── domain/               # Domain layer
+│       │   └── infrastructure/        # Infrastructure layer
+│       └── go.mod
+├── shared/                            # Shared Libraries
+│   └── pkg/                          # Reusable packages
+│       ├── auth/                     # JWT utilities
+│       ├── config/                   # Configuration management
+│       ├── database/                 # Database utilities
+│       ├── logger/                   # Structured logging
+│       ├── middleware/               # HTTP middleware
+│       └── response/                 # API response utilities
+├── configs/                          # Environment configurations
+├── k8s/                             # Kubernetes manifests
+├── scripts/                         # Build and deployment scripts
+└── tests/                           # Test suites
+    ├── unit/                        # Unit tests
+    ├── integration/                 # Integration tests
+    ├── mocks/                       # Mock implementations
+    └── utils/                       # Test utilities
+```
+
+### Clean Architecture Implementation
+
+Each service follows Clean Architecture principles:
+
+#### Domain Layer (Inner Layer)
+```go
+// entities/user.go
+type User struct {
+    ID        string    `json:"id"`
+    Email     string    `json:"email"`
+    FirstName string    `json:"first_name"`
+    LastName  string    `json:"last_name"`
+    Role      UserRole  `json:"role"`
+    Status    UserStatus `json:"status"`
+    CreatedAt time.Time `json:"created_at"`
+    UpdatedAt time.Time `json:"updated_at"`
+}
+
+// repositories/user_repository.go
+type UserRepository interface {
+    Create(ctx context.Context, user *User) (*User, error)
+    GetByID(ctx context.Context, id string) (*User, error)
+    GetByEmail(ctx context.Context, email string) (*User, error)
+    Update(ctx context.Context, user *User) error
+    Delete(ctx context.Context, id string) error
+}
+```
+
+#### Application Layer (Use Cases)
+```go
+// services/user_service.go
+type UserService struct {
+    userRepo   domain.UserRepository
+    logger     logger.Logger
+    validator  validator.Validator
+}
+
+func (s *UserService) CreateUser(ctx context.Context, req *dto.CreateUserRequest) (*dto.UserResponse, error) {
+    // Business logic implementation
+    // Validation, domain rules, etc.
+}
+```
+
+#### Infrastructure Layer (External)
+```go
+// database/user_repository.go
+type userRepository struct {
+    db     *gorm.DB
+    logger logger.Logger
+}
+
+func (r *userRepository) Create(ctx context.Context, user *domain.User) (*domain.User, error) {
+    // Database implementation
+}
+
+// http/handlers/user_handler.go
+type UserHandler struct {
+    userService application.UserService
+    logger      logger.Logger
+}
+
+func (h *UserHandler) CreateUser(c *gin.Context) {
+    // HTTP handler implementation
+}
 ```
 
 ## 📝 Coding Standards
@@ -90,644 +188,712 @@ We follow the official [Go Code Review Comments](https://github.com/golang/go/wi
 #### Key Principles
 
 1. **Package Names**: Short, concise, lowercase, no underscores
-2. **Interface Names**: Single method interfaces end with `-er` (e.g., `Reader`, `Writer`)
+```go
+// Good
+package auth
+package database
+
+// Bad
+package auth_service
+package databaseUtils
+```
+
+2. **Interface Names**: Single method interfaces end with `-er`
+```go
+// Good
+type Reader interface {
+    Read([]byte) (int, error)
+}
+
+type UserRepository interface {
+    Create(context.Context, *User) error
+    GetByID(context.Context, string) (*User, error)
+}
+```
+
 3. **Variable Names**: Use camelCase, be descriptive but concise
-4. **Constants**: Use camelCase or SCREAMING_SNAKE_CASE for exported constants
-5. **Error Handling**: Always handle errors explicitly
+```go
+// Good
+userID := "123"
+httpClient := &http.Client{}
 
-#### Code Formatting
+// Bad
+userId := "123"
+HTTP_CLIENT := &http.Client{}
+```
 
+4. **Error Handling**: Always handle errors explicitly
+```go
+// Good
+user, err := userService.GetUser(ctx, userID)
+if err != nil {
+    return nil, fmt.Errorf("failed to get user: %w", err)
+}
+
+// Bad
+user, _ := userService.GetUser(ctx, userID)
+```
+
+### Code Organization
+
+#### File Naming
+- Use snake_case for filenames: `user_handler.go`, `auth_service.go`
+- Test files: `user_handler_test.go`
+- Interface files: `user_repository.go` (for repository interfaces)
+
+#### Project Structure
+```go
+// services/user-service/internal/domain/entities/user.go
+package entities
+
+// services/user-service/internal/domain/repositories/user_repository.go
+package repositories
+
+// services/user-service/internal/application/services/user_service.go
+package services
+
+// services/user-service/internal/infrastructure/database/user_repository.go
+package database
+
+// services/user-service/internal/infrastructure/http/handlers/user_handler.go
+package handlers
+```
+
+### Code Formatting
+
+#### Use gofmt and goimports
 ```bash
-# Format code
-go fmt ./...
-
-# Run linter
-golangci-lint run
+# Format all Go files
+find . -name "*.go" -not -path "./vendor/*" | xargs gofmt -s -w
 
 # Organize imports
-goimports -w .
+find . -name "*.go" -not -path "./vendor/*" | xargs goimports -w
 ```
 
-### Clean Architecture Layers
+#### Linting Configuration
+```yaml
+# .golangci.yml
+linters-settings:
+  golint:
+    min-confidence: 0
+  gocyclo:
+    min-complexity: 10
+  dupl:
+    threshold: 100
 
-#### 1. Domain Layer (`internal/domain/`)
-**Purpose**: Core business logic, independent of external concerns
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gocritic
+    - gofmt
+    - goimports
+```
+
+## 🧪 Testing Practices
+
+### Testing Strategy
+
+#### 1. Unit Tests
+Test individual functions and methods in isolation:
 
 ```go
-// entities/user.go
-type User struct {
-    ID        string
-    Email     string
-    FirstName string
-    LastName  string
-    Role      UserRole
-    Status    UserStatus
-    CreatedAt time.Time
-    UpdatedAt time.Time
-}
-
-// Business methods
-func (u *User) IsAdmin() bool {
-    return u.Role == RoleAdmin
-}
-
-func (u *User) IsActive() bool {
-    return u.Status == StatusActive
-}
-```
-
-**Rules**:
-- ✅ Pure business logic
-- ✅ No external dependencies
-- ❌ No database imports
-- ❌ No HTTP imports
-- ❌ No third-party libraries
-
-#### 2. Application Layer (`internal/application/`)
-**Purpose**: Use cases and application-specific business rules
-
-```go
-// services/user_app_service.go
-type UserApplicationService struct {
-    userRepo     repositories.UserRepository
-    domainSvc    services.UserDomainService
-    jwtManager   auth.JWTManager
-    logger       logger.Logger
-}
-
-func (s *UserApplicationService) CreateUser(ctx context.Context, req *dto.CreateUserRequest) (*dto.UserResponse, error) {
-    // Validation
-    if err := req.Validate(); err != nil {
-        return nil, err
-    }
+// services/user-service/internal/application/services/user_service_test.go
+func TestUserService_CreateUser(t *testing.T) {
+    // Arrange
+    mockRepo := &mocks.UserRepository{}
+    mockValidator := &mocks.Validator{}
+    service := NewUserService(mockRepo, mockValidator)
     
-    // Business logic
-    user, err := entities.NewUser(req.Email, req.Password, req.FirstName, req.LastName)
-    if err != nil {
-        return nil, err
-    }
-    
-    // Repository interaction
-    if err := s.userRepo.Create(ctx, user); err != nil {
-        return nil, err
-    }
-    
-    return dto.NewUserResponse(user), nil
-}
-```
-
-**Rules**:
-- ✅ Orchestrates domain objects
-- ✅ Uses repository interfaces
-- ✅ Handles use cases
-- ❌ No HTTP concerns
-- ❌ No database implementation details
-
-#### 3. Infrastructure Layer (`internal/infrastructure/`)
-**Purpose**: External concerns, implementations, frameworks
-
-```go
-// database/user_repository_impl.go
-type userRepository struct {
-    db     database.DB
-    logger logger.Logger
-}
-
-func (r *userRepository) Create(ctx context.Context, user *entities.User) error {
-    model := &UserModel{
-        ID:        user.ID,
-        Email:     user.Email,
-        FirstName: user.FirstName,
-        // ... other fields
-    }
-    
-    return r.db.Create(model).Error
-}
-```
-
-**Rules**:
-- ✅ Implements domain interfaces
-- ✅ Framework-specific code
-- ✅ External service integrations
-- ✅ Database implementations
-
-### Naming Conventions
-
-#### Files and Directories
-```
-user_service.go          # Snake case for files
-UserService             # Pascal case for types
-createUser              # Camel case for methods
-USER_ROLE_ADMIN         # Screaming snake for constants
-```
-
-#### Database
-```sql
--- Tables: snake_case, plural
-users
-user_sessions
-
--- Columns: snake_case
-first_name
-created_at
-```
-
-#### API Endpoints
-```
-GET  /api/v1/users/profile      # Kebab case for URLs
-POST /api/v1/users/change-password
-```
-
-## 🧪 Testing Strategy
-
-### Test Structure
-
-```
-tests/
-├── unit/                    # Unit tests (fast, isolated)
-│   └── user_service_test.go
-├── integration/             # Integration tests (with database)
-│   └── user_api_test.go
-├── mocks/                   # Generated mocks
-│   └── user_repository_mock.go
-└── utils/                   # Test utilities
-    └── test_helper.go
-```
-
-### Unit Testing
-
-```go
-// tests/unit/user_service_test.go
-func TestUserApplicationService_CreateUser(t *testing.T) {
-    // Setup
-    mockRepo := &mocks.MockUserRepository{}
-    userSvc := services.NewUserApplicationService(mockRepo, ...)
-
-    // Configure mock
-    mockRepo.On("ExistsByEmail", mock.Anything, "test@example.com").Return(false, nil)
-    mockRepo.On("Create", mock.Anything, mock.AnythingOfType("*entities.User")).Return(nil)
-
-    // Execute
     req := &dto.CreateUserRequest{
         Email:     "test@example.com",
         Password:  "password123",
         FirstName: "Test",
         LastName:  "User",
     }
-    result, err := userSvc.CreateUser(context.Background(), req)
-
+    
+    expectedUser := &domain.User{
+        ID:        "user-id",
+        Email:     req.Email,
+        FirstName: req.FirstName,
+        LastName:  req.LastName,
+    }
+    
+    mockRepo.On("Create", mock.Anything, mock.AnythingOfType("*domain.User")).
+        Return(expectedUser, nil)
+    mockValidator.On("Validate", req).Return(nil)
+    
+    // Act
+    result, err := service.CreateUser(context.Background(), req)
+    
     // Assert
     assert.NoError(t, err)
-    assert.NotNil(t, result)
-    assert.Equal(t, "test@example.com", result.Email)
+    assert.Equal(t, expectedUser.Email, result.Email)
     mockRepo.AssertExpectations(t)
+    mockValidator.AssertExpectations(t)
 }
 ```
 
-### Integration Testing
+#### 2. Integration Tests
+Test service interactions with real database:
 
 ```go
-// tests/integration/user_api_test.go
-func TestUserRegistrationIntegration(t *testing.T) {
+// tests/integration/user_service_integration_test.go
+//go:build integration
+// +build integration
+
+func TestUserService_Integration(t *testing.T) {
     // Setup test database
-    db := utils.SetupTestDB(t)
-    defer utils.CleanupDatabase(t, db)
-
-    // Setup test server
-    router := utils.SetupTestRouter()
-    // ... setup dependencies and routes
-
-    // Test user registration
-    userRequest := map[string]interface{}{
-        "email":      "test@example.com",
-        "password":   "password123",
-        "first_name": "Test",
-        "last_name":  "User",
-    }
-
-    w := utils.MakeRequest(t, router, "POST", "/api/v1/users/register", userRequest, nil)
-    response := utils.AssertSuccessResponse(t, w, 201)
+    db := setupTestDatabase(t)
+    defer cleanupTestDatabase(t, db)
     
-    // Verify response
-    assert.Equal(t, "User created successfully", response["message"])
+    // Create service with real dependencies
+    userRepo := database.NewUserRepository(db)
+    userService := services.NewUserService(userRepo, validator.New())
+    
+    // Test user creation
+    req := &dto.CreateUserRequest{
+        Email:     "integration@example.com",
+        Password:  "password123",
+        FirstName: "Integration",
+        LastName:  "Test",
+    }
+    
+    user, err := userService.CreateUser(context.Background(), req)
+    assert.NoError(t, err)
+    assert.NotEmpty(t, user.ID)
+    
+    // Test user retrieval
+    retrievedUser, err := userService.GetUser(context.Background(), user.ID)
+    assert.NoError(t, err)
+    assert.Equal(t, user.Email, retrievedUser.Email)
+}
+```
+
+#### 3. API Tests
+Test HTTP endpoints:
+
+```go
+// tests/api/user_api_test.go
+func TestUserAPI_Register(t *testing.T) {
+    // Setup test server
+    router := setupTestRouter()
+    
+    // Test user registration
+    reqBody := `{
+        "email": "api@example.com",
+        "password": "password123",
+        "first_name": "API",
+        "last_name": "Test"
+    }`
+    
+    req := httptest.NewRequest("POST", "/api/v1/users/register", strings.NewReader(reqBody))
+    req.Header.Set("Content-Type", "application/json")
+    
+    w := httptest.NewRecorder()
+    router.ServeHTTP(w, req)
+    
+    assert.Equal(t, http.StatusCreated, w.Code)
+    
+    var response map[string]interface{}
+    err := json.Unmarshal(w.Body.Bytes(), &response)
+    assert.NoError(t, err)
+    assert.True(t, response["success"].(bool))
 }
 ```
 
 ### Running Tests
 
 ```bash
-# Unit tests only
-go test ./tests/unit/...
+# Run all unit tests
+go test ./... -short
 
-# Integration tests (requires database)
+# Run integration tests
 go test -tags=integration ./tests/integration/...
 
-# All tests with coverage
+# Run tests with coverage
 go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
+go tool cover -html=coverage.out -o coverage.html
 
-# Specific test
-go test -v ./tests/unit -run TestUserApplicationService_CreateUser
+# Run specific service tests
+go test ./services/user-service/...
 
-# Generate test report
-go test -json ./... | tee test-report.json
+# Run tests with race detection
+go test -race ./...
+
+# Verbose output
+go test -v ./...
 ```
 
-### Mock Generation
+### Test Utilities
 
+#### Database Test Setup
+```go
+// tests/utils/database.go
+func SetupTestDatabase(t *testing.T) *gorm.DB {
+    db, err := gorm.Open(postgres.Open(getTestDSN()), &gorm.Config{})
+    require.NoError(t, err)
+    
+    // Run migrations
+    err = db.AutoMigrate(&domain.User{})
+    require.NoError(t, err)
+    
+    return db
+}
+
+func CleanupTestDatabase(t *testing.T, db *gorm.DB) {
+    db.Exec("DELETE FROM users")
+}
+```
+
+#### Mock Generation
 ```bash
 # Install mockery
 go install github.com/vektra/mockery/v2@latest
 
-# Generate mocks
-mockery --name=UserRepository --dir=services/user-service/internal/domain/repositories --output=tests/mocks
+# Generate mocks for interfaces
+mockery --dir=./services/user-service/internal/domain/repositories --all --output=./tests/mocks
+
+# Generate mock for specific interface
+mockery --name=UserRepository --dir=./services/user-service/internal/domain/repositories --output=./tests/mocks
 ```
 
-## 🔧 Development Workflow
+## 🔄 Development Workflow
 
-### 1. Feature Development
+### Git Workflow
 
+#### Branch Naming
+- `feature/service-name-feature-description`
+- `bugfix/service-name-issue-description`
+- `hotfix/service-name-critical-fix`
+
+Examples:
+```bash
+git checkout -b feature/user-service-password-reset
+git checkout -b bugfix/auth-service-token-validation
+git checkout -b hotfix/api-gateway-memory-leak
+```
+
+#### Commit Messages
+```bash
+# Format: type(service): description
+git commit -m "feat(user-service): add password reset functionality"
+git commit -m "fix(auth-service): resolve JWT token validation issue"
+git commit -m "docs(api-gateway): update API documentation"
+git commit -m "test(user-service): add unit tests for user registration"
+```
+
+### Development Process
+
+#### 1. Feature Development
 ```bash
 # 1. Create feature branch
-git checkout -b feature/user-profile-update
+git checkout -b feature/user-service-email-verification
 
-# 2. Make changes following clean architecture
-# - Add/modify domain entities
-# - Update application services
-# - Implement infrastructure changes
+# 2. Start development environment
+docker-compose -f docker-compose.dev.yml up -d postgres redis
 
-# 3. Write tests
-# - Unit tests for business logic
-# - Integration tests for API endpoints
+# 3. Start service with hot reload
+cd services/user-service && air
 
-# 4. Run tests and linting
-go test ./...
-golangci-lint run
+# 4. Write tests first (TDD approach)
+# Create test file: internal/application/services/email_service_test.go
 
-# 5. Commit and push
+# 5. Implement feature
+# Create implementation: internal/application/services/email_service.go
+
+# 6. Run tests
+go test ./internal/application/services/...
+
+# 7. Test integration
+curl -X POST http://localhost:8082/api/v1/users/verify-email \
+  -H "Content-Type: application/json" \
+  -d '{"token": "verification-token"}'
+
+# 8. Commit changes
 git add .
-git commit -m "feat: add user profile update functionality"
-git push origin feature/user-profile-update
+git commit -m "feat(user-service): add email verification functionality"
+
+# 9. Push and create PR
+git push origin feature/user-service-email-verification
 ```
 
-### 2. Database Changes
+#### 2. Code Review Checklist
+- [ ] **Tests**: Unit tests cover new functionality
+- [ ] **Documentation**: Code is well-documented
+- [ ] **Error Handling**: All errors are properly handled
+- [ ] **Logging**: Appropriate logging levels and messages
+- [ ] **Security**: No secrets or sensitive data in code
+- [ ] **Performance**: No obvious performance issues
+- [ ] **Dependencies**: No unnecessary dependencies added
 
-```bash
-# 1. Update entity models
-# 2. Create migration script in scripts/migrations/
-# 3. Update repository implementations
-# 4. Test with fresh database
+### Service Development
 
-# Apply migrations
-psql -U postgres -d api_server -f scripts/migrations/001_add_user_fields.sql
+#### Adding New Endpoint
+1. **Define Domain Entity** (if needed)
+```go
+// internal/domain/entities/user_profile.go
+type UserProfile struct {
+    UserID      string `json:"user_id"`
+    Bio         string `json:"bio"`
+    AvatarURL   string `json:"avatar_url"`
+    // ... other fields
+}
 ```
 
-### 3. Configuration Changes
-
-```bash
-# 1. Update config struct in shared/pkg/config/
-# 2. Update YAML files in configs/
-# 3. Update environment variable documentation
-# 4. Test with different environments
+2. **Define Repository Interface**
+```go
+// internal/domain/repositories/user_profile_repository.go
+type UserProfileRepository interface {
+    GetByUserID(ctx context.Context, userID string) (*UserProfile, error)
+    Update(ctx context.Context, profile *UserProfile) error
+}
 ```
 
-### 4. Adding New Endpoints
+3. **Create DTO**
+```go
+// internal/application/dto/user_profile_dto.go
+type UpdateUserProfileRequest struct {
+    Bio       string `json:"bio" validate:"max=500"`
+    AvatarURL string `json:"avatar_url" validate:"url"`
+}
 
-```bash
-# 1. Add DTO in application/dto/
-# 2. Add use case in application/services/
-# 3. Add handler in infrastructure/http/handlers/
-# 4. Register route in main.go
-# 5. Write integration tests
-# 6. Update API documentation
+type UserProfileResponse struct {
+    UserID    string `json:"user_id"`
+    Bio       string `json:"bio"`
+    AvatarURL string `json:"avatar_url"`
+    UpdatedAt string `json:"updated_at"`
+}
 ```
 
-## 🐛 Debugging
+4. **Implement Application Service**
+```go
+// internal/application/services/user_profile_service.go
+type UserProfileService struct {
+    profileRepo domain.UserProfileRepository
+    logger      logger.Logger
+}
+
+func (s *UserProfileService) UpdateProfile(ctx context.Context, userID string, req *dto.UpdateUserProfileRequest) (*dto.UserProfileResponse, error) {
+    // Implementation
+}
+```
+
+5. **Implement Infrastructure**
+```go
+// internal/infrastructure/database/user_profile_repository.go
+type userProfileRepository struct {
+    db *gorm.DB
+}
+
+func (r *userProfileRepository) GetByUserID(ctx context.Context, userID string) (*domain.UserProfile, error) {
+    // Database implementation
+}
+```
+
+6. **Create HTTP Handler**
+```go
+// internal/infrastructure/http/handlers/user_profile_handler.go
+type UserProfileHandler struct {
+    profileService application.UserProfileService
+}
+
+func (h *UserProfileHandler) UpdateProfile(c *gin.Context) {
+    // HTTP handler implementation
+}
+```
+
+7. **Register Route**
+```go
+// internal/infrastructure/http/routes.go
+func SetupRoutes(router *gin.Engine, handlers *Handlers) {
+    api := router.Group("/api/v1/users")
+    {
+        api.PUT("/profile", middleware.AuthRequired(), handlers.UserProfile.UpdateProfile)
+    }
+}
+```
+
+## 🔧 Debugging and Monitoring
 
 ### Local Debugging
 
-#### VS Code Debug Configuration (`.vscode/launch.json`)
+#### VS Code Debug Configuration
 ```json
+// .vscode/launch.json
 {
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch User Service",
+            "name": "Debug User Service",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/services/user-service/cmd/server/main.go",
+            "program": "./services/user-service/cmd/server",
             "env": {
-                "USER_SERVICE_ENVIRONMENT": "development",
-                "USER_SERVICE_DATABASE_HOST": "localhost"
-            },
-            "args": []
+                "USER_SERVICE_DATABASE_HOST": "localhost",
+                "USER_SERVICE_LOGGING_LEVEL": "debug"
+            }
         }
     ]
 }
 ```
 
-#### Delve Command Line
+#### Debug with Delve
 ```bash
 # Install delve
 go install github.com/go-delve/delve/cmd/dlv@latest
 
-# Debug user service
+# Start debugger
 cd services/user-service
-dlv debug cmd/server/main.go
+dlv debug ./cmd/server
 
-# Set breakpoint and continue
-(dlv) break main.main
+# Set breakpoints and continue
+(dlv) break internal/application/services/user_service.go:45
 (dlv) continue
 ```
 
-### Docker Debugging
+### Logging Best Practices
 
-#### Enable Debug Mode
-```bash
-# Start with debug build
-docker-compose -f docker-compose.dev.yml up -d
-
-# Attach debugger
-docker-compose exec user-service dlv attach --headless --listen=:2345 --api-version=2 1
-```
-
-#### Remote Debugging
-```bash
-# Connect to debug port
-dlv connect localhost:2345
-```
-
-### Logging for Debugging
-
+#### Structured Logging
 ```go
-// Add debug logs in your code
-logger.WithFields(logger.Fields{
-    "user_id": userID,
-    "operation": "update_profile",
-}).Debug("Starting profile update")
-
-// Log with context
-logger.WithContext(ctx).
-    WithField("request_id", requestID).
-    Info("Processing request")
-```
-
-## 🔍 Performance Guidelines
-
-### Database Optimization
-
-```go
-// Use indexes for queries
-func (r *userRepository) GetUsersByRole(ctx context.Context, role entities.UserRole) ([]*entities.User, error) {
-    // This query should have index on 'role' column
-    var users []UserModel
-    err := r.db.Where("role = ?", role).Find(&users).Error
-    return convertToEntities(users), err
-}
-
-// Use pagination for large datasets
-func (r *userRepository) List(ctx context.Context, offset, limit int) ([]*entities.User, int64, error) {
-    var users []UserModel
-    var total int64
+// Use consistent logging with context
+func (s *UserService) CreateUser(ctx context.Context, req *dto.CreateUserRequest) (*dto.UserResponse, error) {
+    requestID := middleware.GetRequestID(ctx)
     
-    r.db.Model(&UserModel{}).Count(&total)
-    err := r.db.Offset(offset).Limit(limit).Find(&users).Error
+    s.logger.Info("Creating user",
+        zap.String("request_id", requestID),
+        zap.String("email", req.Email),
+        zap.String("operation", "create_user"),
+    )
     
-    return convertToEntities(users), total, err
-}
-```
-
-### Memory Management
-
-```go
-// Avoid memory leaks in goroutines
-func (s *UserApplicationService) ProcessBulkUsers(ctx context.Context, users []User) error {
-    // Use context for cancellation
-    select {
-    case <-ctx.Done():
-        return ctx.Err()
-    default:
-        // Process users
-    }
-    
-    // Process in batches to avoid memory issues
-    const batchSize = 100
-    for i := 0; i < len(users); i += batchSize {
-        end := i + batchSize
-        if end > len(users) {
-            end = len(users)
-        }
-        
-        if err := s.processBatch(ctx, users[i:end]); err != nil {
-            return err
-        }
-    }
-    
-    return nil
-}
-```
-
-### API Performance
-
-```go
-// Use appropriate HTTP status codes
-func (h *UserHandler) GetUser(c *gin.Context) {
-    userID := c.Param("id")
-    
-    user, err := h.userService.GetUser(c.Request.Context(), userID)
+    user, err := s.userRepo.Create(ctx, domainUser)
     if err != nil {
-        if errors.Is(err, domain.ErrUserNotFound) {
-            response.Error(c, http.StatusNotFound, "User not found")
-            return
-        }
-        response.Error(c, http.StatusInternalServerError, "Internal server error")
-        return
+        s.logger.Error("Failed to create user",
+            zap.String("request_id", requestID),
+            zap.String("email", req.Email),
+            zap.Error(err),
+        )
+        return nil, fmt.Errorf("failed to create user: %w", err)
     }
     
-    response.Success(c, http.StatusOK, "User retrieved successfully", user)
-}
-
-// Implement caching for frequently accessed data
-func (h *UserHandler) GetProfile(c *gin.Context) {
-    userID := auth.GetUserIDFromContext(c)
+    s.logger.Info("User created successfully",
+        zap.String("request_id", requestID),
+        zap.String("user_id", user.ID),
+        zap.String("email", user.Email),
+    )
     
-    // Check cache first
-    if cached := h.cache.Get(fmt.Sprintf("user:%s", userID)); cached != nil {
-        response.Success(c, http.StatusOK, "Profile retrieved from cache", cached)
-        return
-    }
-    
-    // Fetch from database
-    user, err := h.userService.GetUser(c.Request.Context(), userID)
-    if err != nil {
-        response.Error(c, http.StatusInternalServerError, "Failed to get profile")
-        return
-    }
-    
-    // Cache for future requests
-    h.cache.Set(fmt.Sprintf("user:%s", userID), user, 5*time.Minute)
-    
-    response.Success(c, http.StatusOK, "Profile retrieved successfully", user)
+    return response, nil
 }
 ```
 
-## 📚 Useful Commands
+#### Log Levels
+- **DEBUG**: Detailed information for debugging
+- **INFO**: General operational messages
+- **WARN**: Warning conditions
+- **ERROR**: Error conditions that might still allow operation
+- **FATAL**: Very serious errors that will abort the program
 
-### Development Commands
+### Performance Monitoring
 
-```bash
-# Start development environment
-make dev                                    # If Makefile exists
-docker-compose -f docker-compose.dev.yml up -d
-
-# Hot reload development
-cd services/user-service && air
-
-# Run tests
-go test ./...                              # All tests
-go test -v ./tests/unit/...               # Unit tests only
-go test -tags=integration ./tests/integration/...  # Integration tests
-
-# Code quality
-go fmt ./...                              # Format code
-golangci-lint run                         # Run linter
-go mod tidy                              # Clean dependencies
+#### Adding Metrics
+```go
+// Use prometheus metrics
+var (
+    httpRequestsTotal = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "http_requests_total",
+            Help: "Total number of HTTP requests.",
+        },
+        []string{"service", "method", "endpoint", "status_code"},
+    )
+    
+    httpRequestDuration = prometheus.NewHistogramVec(
+        prometheus.HistogramOpts{
+            Name: "http_request_duration_seconds",
+            Help: "HTTP request latency distributions.",
+        },
+        []string{"service", "method", "endpoint"},
+    )
+)
 ```
 
-### Database Commands
-
-```bash
-# Connect to database
-docker-compose exec postgres psql -U postgres -d api_server
-
-# Run migrations
-psql -U postgres -d api_server -f scripts/init-db.sql
-
-# Backup database
-docker-compose exec postgres pg_dump -U postgres api_server > backup.sql
-
-# Restore database
-docker-compose exec -i postgres psql -U postgres api_server < backup.sql
+#### Database Query Monitoring
+```go
+// Add query logging in repository
+func (r *userRepository) Create(ctx context.Context, user *domain.User) (*domain.User, error) {
+    start := time.Now()
+    defer func() {
+        duration := time.Since(start)
+        r.logger.Debug("Database query executed",
+            zap.String("operation", "create_user"),
+            zap.Duration("duration", duration),
+        )
+    }()
+    
+    result := r.db.WithContext(ctx).Create(user)
+    return user, result.Error
+}
 ```
 
-### Docker Commands
+## 🚀 Deployment and CI/CD
 
-```bash
-# Build images
-docker build -t api-server/user-service .
+### Docker Best Practices
 
-# View logs
-docker-compose logs -f user-service
+#### Multi-stage Dockerfile
+```dockerfile
+# Build stage
+FROM golang:1.21-alpine AS builder
 
-# Execute commands in container
-docker-compose exec user-service sh
+WORKDIR /app
 
-# Clean up
-docker-compose down -v                    # Stop and remove volumes
-docker system prune -af                   # Clean everything
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
+
+# Runtime stage
+FROM alpine:3.18
+
+RUN apk --no-cache add ca-certificates tzdata
+WORKDIR /root/
+
+# Copy binary from builder stage
+COPY --from=builder /app/main .
+COPY --from=builder /app/configs ./configs
+
+# Create non-root user
+RUN adduser -D -s /bin/sh api-user
+USER api-user
+
+EXPOSE 8082
+
+CMD ["./main"]
 ```
 
-## 🤝 Contributing
+### CI/CD Pipeline
 
-### Pull Request Process
+#### GitHub Actions Example
+```yaml
+# .github/workflows/ci.yml
+name: CI/CD Pipeline
 
-1. **Fork and Clone**: Fork the repository and clone your fork
-2. **Branch**: Create a feature branch from `main`
-3. **Develop**: Make your changes following the coding standards
-4. **Test**: Ensure all tests pass and add new tests for new features
-5. **Document**: Update documentation for API changes
-6. **Commit**: Use conventional commit messages
-7. **Push**: Push to your fork and create a pull request
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
 
-### Commit Message Format
-
-```
-<type>(<scope>): <subject>
-
-<body>
-
-<footer>
-```
-
-**Types**:
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes (formatting, etc.)
-- `refactor`: Code refactoring
-- `test`: Adding or updating tests
-- `chore`: Build process or auxiliary tool changes
-
-**Examples**:
-```
-feat(user): add user profile update endpoint
-
-Add PUT /api/v1/users/profile endpoint to allow users to update
-their profile information including first name and last name.
-
-Closes #123
-```
-
-### Code Review Checklist
-
-- [ ] Code follows Go style guide
-- [ ] Clean architecture layers are respected
-- [ ] All tests pass
-- [ ] New features have tests
-- [ ] API changes are documented
-- [ ] Error handling is appropriate
-- [ ] Logging is meaningful
-- [ ] No security vulnerabilities
-- [ ] Performance considerations addressed
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-#### Hot Reload Not Working
-```bash
-# Check Air configuration
-cat .air.toml
-
-# Restart Air
-pkill air
-air
-```
-
-#### Database Connection Issues
-```bash
-# Check if database is running
-docker-compose ps postgres
-
-# Check database logs
-docker-compose logs postgres
-
-# Test connection
-docker-compose exec postgres pg_isready -U postgres
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: api_server_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: 1.21
+    
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+    
+    - name: Install dependencies
+      run: go mod download
+    
+    - name: Run tests
+      run: |
+        go test -v ./...
+        go test -tags=integration -v ./tests/integration/...
+      env:
+        USER_SERVICE_DATABASE_HOST: localhost
+        USER_SERVICE_DATABASE_DATABASE: api_server_test
+        USER_SERVICE_JWT_SECRET: test-secret
+    
+    - name: Run linter
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: latest
+    
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Build Docker images
+      run: |
+        docker build -t api-server/user-service:${{ github.sha }} ./services/user-service
+        docker build -t api-server/auth-service:${{ github.sha }} ./services/auth-service
+        docker build -t api-server/api-gateway:${{ github.sha }} ./services/api-gateway
 ```
 
-#### Import Path Issues
-```bash
-# Clean module cache
-go clean -modcache
+## 📚 Contributing Guidelines
 
-# Reinitialize modules
-rm go.mod go.sum
-go mod init github.com/your-org/api-server
-go mod tidy
+### Before Contributing
+
+1. **Read Documentation**: Understand the architecture and coding standards
+2. **Setup Environment**: Follow the development setup guide
+3. **Run Tests**: Ensure all tests pass locally
+4. **Check Linting**: Run golangci-lint on your changes
+
+### Contribution Process
+
+1. **Fork Repository**: Create your own fork
+2. **Create Branch**: Use descriptive branch names
+3. **Write Tests**: Add tests for new functionality
+4. **Follow Standards**: Adhere to coding standards
+5. **Update Documentation**: Update relevant documentation
+6. **Submit PR**: Create detailed pull request
+
+### Pull Request Template
+
+```markdown
+## Description
+Brief description of changes
+
+## Type of Change
+- [ ] Bug fix (non-breaking change which fixes an issue)
+- [ ] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Documentation update
+
+## Testing
+- [ ] Unit tests pass
+- [ ] Integration tests pass
+- [ ] Manual testing completed
+
+## Checklist
+- [ ] Code follows project coding standards
+- [ ] Self-review completed
+- [ ] Documentation updated
+- [ ] No sensitive data exposed
 ```
 
-#### Test Failures
-```bash
-# Run specific test with verbose output
-go test -v ./tests/unit -run TestUserService
-
-# Run tests with race detection
-go test -race ./...
-
-# Clean test cache
-go clean -testcache
-```
-
-For more troubleshooting help, check the [Setup Guide](SETUP_GUIDE.md) troubleshooting section.
+This development guide provides a comprehensive foundation for working on the API Server microservices project. Follow these practices to maintain code quality and ensure smooth collaboration.

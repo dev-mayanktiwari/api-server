@@ -3,11 +3,11 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/auth"
+	"github.com/dev-mayanktiwari/api-server/shared/pkg/errors"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/logger"
 	"github.com/dev-mayanktiwari/api-server/shared/pkg/response"
 	"github.com/dev-mayanktiwari/api-server/services/user-service/internal/application/dto"
@@ -33,7 +33,6 @@ func NewUserHandler(userAppService *services.UserApplicationService, log *logger
 func (h *UserHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware gin.HandlerFunc) {
 	// Public routes
 	router.POST("/register", h.Register)
-	router.POST("/login", h.Login)
 
 	// Protected routes
 	protected := router.Group("", authMiddleware)
@@ -98,48 +97,6 @@ func (h *UserHandler) Register(c *gin.Context) {
 	response.Created(c, "User created successfully", user)
 }
 
-// Login authenticates a user
-// @Summary User login
-// @Description Authenticate user and return JWT token
-// @Tags Users
-// @Accept json
-// @Produce json
-// @Param credentials body dto.LoginRequest true "Login credentials"
-// @Success 200 {object} response.Response{data=services.LoginResponse}
-// @Failure 400 {object} response.Response
-// @Failure 401 {object} response.Response
-// @Failure 500 {object} response.Response
-// @Router /users/login [post]
-func (h *UserHandler) Login(c *gin.Context) {
-	var req dto.LoginRequest
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.WithFields(logger.Fields{
-			"error":      err.Error(),
-			"request_id": c.GetString("request_id"),
-		}).Warn("Invalid login request")
-		response.ValidationError(c, err)
-		return
-	}
-
-	loginResponse, err := h.userAppService.LoginUser(c.Request.Context(), req.Email, req.Password)
-	if err != nil {
-		h.logger.WithFields(logger.Fields{
-			"email":      req.Email,
-			"error":      err.Error(),
-			"request_id": c.GetString("request_id"),
-		}).Warn("Login failed")
-
-		if appErr, ok := err.(*errors.AppError); ok {
-			response.Error(c, appErr.HTTPStatus, appErr.Code, appErr.Message)
-		} else {
-			response.Unauthorized(c, "Login failed")
-		}
-		return
-	}
-
-	response.Success(c, "Login successful", loginResponse)
-}
 
 // GetProfile gets the current user's profile
 // @Summary Get user profile
@@ -171,7 +128,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, "Profile retrieved successfully", user)
+	response.Success(c, http.StatusOK, "Profile retrieved successfully", user)
 }
 
 // UpdateProfile updates the current user's profile
@@ -219,7 +176,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, "Profile updated successfully", user)
+	response.Success(c, http.StatusOK, "Profile updated successfully", user)
 }
 
 // ChangePassword changes the current user's password
@@ -264,7 +221,7 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, "Password changed successfully", nil)
+	response.Success(c, http.StatusOK, "Password changed successfully", nil)
 }
 
 // GetUser gets a user by ID (admin only)
@@ -299,7 +256,7 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, "User retrieved successfully", user)
+	response.Success(c, http.StatusOK, "User retrieved successfully", user)
 }
 
 // UpdateUser updates a user (admin only)
@@ -352,7 +309,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, "User updated successfully", user)
+	response.Success(c, http.StatusOK, "User updated successfully", user)
 }
 
 // DeleteUser deletes a user (admin only)
@@ -389,7 +346,7 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, "User deleted successfully", nil)
+	response.Success(c, http.StatusOK, "User deleted successfully", nil)
 }
 
 // ListUsers lists all users with pagination (admin only)
@@ -450,7 +407,7 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, "Users retrieved successfully", users)
+	response.Success(c, http.StatusOK, "Users retrieved successfully", users)
 }
 
 // GetUserStatistics gets user statistics (admin only)
@@ -482,7 +439,7 @@ func (h *UserHandler) GetUserStatistics(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, "User statistics retrieved successfully", stats)
+	response.Success(c, http.StatusOK, "User statistics retrieved successfully", stats)
 }
 
 // Add missing DTOs for completeness
